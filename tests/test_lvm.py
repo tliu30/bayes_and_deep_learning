@@ -28,7 +28,7 @@ class TestLinearRegressionLVM(unittest.TestCase):
         assert_array_almost_equal(truth_expand, test_expand.data.numpy())
         assert_array_almost_equal(truth_unpack, test_unpack.data.numpy())
 
-    def test_estimate_batch_likelihood(self):
+    def test_mle_estimate_batch_likelihood(self):
         '''Check that the batch likelihood creates correct calculations & leads to gradients'''
         # Implied dimensions: B = 3, M = 2, K = 1, sub_B = 2
         B = 3
@@ -97,3 +97,36 @@ class TestLinearRegressionLVM(unittest.TestCase):
         test_marginal_log_lik.backward()
         self.assertIsNotNone(mle_params.beta.grad)
         self.assertIsNotNone(mle_params.sigma.grad)
+
+    def test_vb_reparametrize_noise(self):
+        N = 3
+        M = 2
+        K = 1
+        batch = np.array([[i for _ in range(M)] for i in range(N)]).astype(float)
+        noise = np.ones(N, K).astype(float)
+        beta_q = np.array([
+            [1],
+            [1],
+        ]).astype(float)
+        sigma_q = np.array([2]).astype(float)
+
+        vb_params = linear_regression_lvm.VB_PARAMS(
+            beta=None,
+            sigma=None,
+            beta_q=linear_regression_lvm.make_torch_variable(beta_q, True),
+            sigma_q=linear_regression_lvm.make_torch_variable(sigma_q, True),
+        )
+
+        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
+        noise_var = linear_regression_lvm.make_torch_variable(noise, False)
+        reparam_noise = linear_regression_lvm._reparametrize_noise(batch_var, noise_var, vb_params)
+
+        # Check values
+        truth = np.array([[4 + 2 * i] for i in range(N)]).astype(float)
+        assert_array_almost_equal(truth, reparam_noise.data.numpy())
+
+        # Check gradients
+        reparam_noise.sum().sum().backward()
+        self.assertIsNotNone(vb_params.beta_q.grad)
+        self.assertIsNotNone(vb_params.sigma_q.grad)
+

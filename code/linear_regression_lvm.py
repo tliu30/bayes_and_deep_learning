@@ -30,13 +30,6 @@ def make_torch_variable(value, requires_grad, dtype=torch.FloatTensor):
     return Variable(value.type(dtype), requires_grad=requires_grad)
 
 
-def initialize_parameters(M, K):
-    '''Initialize the parameters before fitting'''
-    beta_guess = make_torch_variable(np.random.randn(M, K), True)
-    sigma_guess = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
-    return beta_guess, sigma_guess
-
-
 def select_minibatch(x, B, replace=True):
     '''Shorthand for selecting B random elements & converting to autograd Variable'''
     # Remember, we assume that we're using row vectors!
@@ -60,8 +53,9 @@ def gradient_descent_step(variable, learning_rate):
 def gradient_descent_step_parameter_tuple(parameter_tuple, learning_rate):
     for nm in parameter_tuple._fields:
         variable = parameter_tuple.__getattribute__(nm)
-        logger.debug('Updating {name:s} (value, grad, step) = ({v:.2f}, {g:.2f}, {s:.2f}'
-                     .format(name=nm, v=variable.data, g=variable.grad, s=learning_rate))
+        logger.debug('Updating {name:s} (value, grad, step) = ({v:s}, {g:s}, {s:s}'
+                     .format(name=nm, v=str(variable.data), g=str(variable.grad),
+                             s=str(learning_rate)))
         gradient_descent_step(variable, learning_rate)
 
 
@@ -82,6 +76,13 @@ def clear_gradients_parameter_tuple(parameter_tuple):
 # Methods for maximum likelihood model fitting
 
 MLE_PARAMS = namedtuple('MLE_PARAMS', ['beta', 'sigma'])
+
+
+def mle_initialize_parameters(M, K):
+    '''Initialize the parameters before fitting'''
+    beta = make_torch_variable(np.random.randn(K, M), True)
+    sigma = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    return MLE_PARAMS(beta=beta, sigma=sigma)
 
 
 def _mle_expand_batch(variable, sub_B):
@@ -128,7 +129,7 @@ def mle_estimate_batch_likelihood(batch, mle_params, sub_B, test_noise=None):
     mu = torch.mm(noise, mle_params.beta)
 
     identity = make_torch_variable(np.identity(M), False)
-    sigma = torch.mul(mle_params.sigma, identity)
+    sigma = torch.mul(mle_params.sigma ** 2, identity)
 
     likelihood = mvn.torch_mvn_density(batch, mu, sigma)
 
@@ -156,7 +157,90 @@ def mle_forward_step(x, mle_params, B, sub_B, learning_rate):
     # Update step
     gradient_descent_step_parameter_tuple(mle_params, learning_rate)
 
+    # Constrain sigma
+    mle_params.sigma.data[0] = max(1e-10, mle_params.sigma.data[0])
+
     # Clear gradients
     clear_gradients_parameter_tuple(mle_params)
 
-    return mle_params, learning_rate
+    return mle_params, neg_marginal_log_lik
+
+
+# Methods for variational bayes fitting
+
+VB_PARAMS = namedtuple('VB_PARAMS', ['beta', 'sigma', 'beta_q', 'sigma_q'])
+
+
+def vb_initialize_parameters(M, K):
+    beta = make_torch_variable(np.random.randn(K, M), True)
+    sigma = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    beta_q = make_torch_variable(np.random.randn(M, K), True)
+    sigma_q = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    return VB_PARAMS(beta=beta, sigma=sigma, beta_q=beta_q, sigma_q=sigma_q)
+
+
+def _reparametrize_noise(batch, noise, vb_params):
+    mu = torch.mm(batch, vb_params.beta_q)
+
+    _, K = noise.size()[1]
+    identity = make_torch_variable(np.identity(K), False)
+    sigma = torch.mul(vb_params.sigma_q ** 2, identity)
+
+    return mu + sigma * noise
+
+
+def vb_estimate_lower_bound(batch, noise, vb_params):
+    B, M = batch.size()
+    B_1, K = noise.size()
+
+    if B != B_1:
+        raise ValueError('Batch size is inconsistent between batch and noise')
+
+    # Compute components
+    mu_x = torch.mm(noise, vb_params.beta)
+    identity_x = make_torch_variable(np.identity(M), False)
+    sigma_x = torch.mul(vb_params.sigma ** 2, identity_x)
+
+    mu_q = torch.mm(batch, vb_params.beta_q)
+    identity_q = make_torch_variable(np.identity(K), False)
+    sigma_q = torch.mul(vb_params.sigma_q ** 2, identity_q)
+
+    mu_prior = make_torch_variable(np.zeros(K), False)
+    sigma_prior = make_torch_variable(np.identity(K), False)
+
+    # Compute log likelihoods
+    log_posterior = mvn.torch_mvn_density(noise, mu_q, sigma_q, log=True)
+    log_likelihood = mvn.torch_mvn_density(batch, mu_x, sigma_x, log=True)
+    log_prior = mvn.torch_mvn_density(noise, mu_prior, sigma_prior, log=True)
+
+    lower_bound = log_posterior - log_likelihood - log_prior
+
+    return lower_bound.sum()
+
+
+def vb_forward_step(x, vb_params, B, learning_rate):
+    # Create minibatch
+    batch = select_minibatch(x, B)
+
+    # Sample noise
+    K, _ = vb_params.beta.size()
+    noise = make_torch_variable(np.random.randn(B, K), False)
+    noise = _reparametrize_noise(batch, noise, vb_params)
+
+    # Estimate marginal likelihood of batch
+    neg_lower_bound = -1 * vb_estimate_lower_bound(batch, noise, vb_params)
+
+    # Do a backward step
+    neg_lower_bound.backward()
+
+    # Update step
+    gradient_descent_step_parameter_tuple(vb_params, learning_rate)
+
+    # Constrain sigma
+    vb_params.sigma.data[0] = max(1e-10, vb_params.sigma.data[0])
+    vb_params.sigma_q.data[0] = max(1e-10, vb_params.sigma_q.data[0])
+
+    # Clear gradients
+    clear_gradients_parameter_tuple(vb_params)
+
+    return vb_params, neg_lower_bound
