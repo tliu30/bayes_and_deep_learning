@@ -1,6 +1,7 @@
 # Introduction
 
 There are some things neural networks are not great for:
+
 * learning with limited amounts of data
 * providing bounds / uncertainty estimates for predictions
 * in the case of classification, recognizing and learning new labels
@@ -41,6 +42,7 @@ to learn the model and the latter a succinct description of the structure.
 We'll focus first on the latter, as it will provide a more immediate sense of
 what is going on. Remember that a neural autoencoder, at it's simplest, has 
 three layers:
+
 * an input layer
 * a hidden layer (usually sparse)
 * an output layer, of dimension same as the input layer
@@ -58,6 +60,7 @@ From a generative model perspective, the model is actually quite simple.
 Given data $\{x_i\} \in \mathbb{R}^n$, we try to learn latent representations
 of each point $\{z_i\} \in \mathbb{R}^m$ where $m < n$. Each data point $x_i$
 is generated conditional on $z_i$ by some distribution $p(x_i | z_i)$.
+
 * we specify a gaussian prior on the $z_i \sim \mathcal{N}(0, I)$
 * we model $p$ as a distribution incorporating neural networks; in particular
   that $p(x_i | z_i) = \mathcal{N}(x_i; \mu(z_i, \theta), \sigma(z_i, \theta))$
@@ -65,7 +68,7 @@ is generated conditional on $z_i$ by some distribution $p(x_i | z_i)$.
   and with (different) parameters $\theta$
 * additionally, since modeling $p(x | z)$ using neural networks makes the
   posterior $p(z | x)$ intractable, we approximate $p(z | x)$ with a distribution
-  $q(z | x) that also uses a neural network, e.g., 
+  $q(z | x)$ that also uses a neural network, e.g., 
   $q(z_i | x_i) = \mathcal{N}(z_i; \mu(x_i, \theta), \sigma(z_i, \theta)$
 
 Specifying the parameters of $p(x | z)$ and $q(z | x)$ as functions of neural 
@@ -84,6 +87,7 @@ In order to capture what exactly the variational autoencoder is doing better,
 let's compare the latent space learned by a variational autoencoder with that
 learned by a standard neural autoencoder and a gaussian process model. The 
 main purpose of this experiment is two-fold:
+
 1. what do we gain by placing a prior on the sparse inner section of a
    neural autoencoder?
 2. what do we gain in expressiveness of the encoding / decoding maps?
@@ -98,12 +102,14 @@ representations on MNIST data.
 ## Inference: lots of tricky math
 
 We frame learning the parameters of the variational autoencoder as 
+
 * maximum likelihood / maximum a posteriori inference on the global parameters
 * variational inference on the latent parameters
 
 Remember that our central goal is to compute the posterior distribution of the
 latent parameters
-\[p(z | x) = \frac{p(z, x)}{p(x)} = \frac{p(x | z) p(z)}{p(x)}\]
+
+\\[p(z | x) = \frac{p(z, x)}{p(x)} = \frac{p(x | z) p(z)}{p(x)}\\]
 
 Since $p(x)$ is intractable in this case (why is it intractable?) we instead
 settle for approximating $p(z | x)$ with another distribution $q(z | x)$; in
@@ -114,22 +120,25 @@ parametrized by $\phi$, and in which $\mu$ and $\sigma$ are neural networks.
 In variational inference, we try to find the distribution in the variational
 family closest to the true posterior, in this case by minimizing the 
 KL-divergence, e.g. we want to find $\phi$ such that we minimize
-\[KL(q_\phi(z | x) || p(z | x)) = E[\log(q_\phi(z | x))] - E[\log(p(z | x))] 
-                                = E[\log(q(z | x))] - E[\log(p(x, z))] + \logp(x)
-\]
+
+\\[KL(q_\phi(z | x) || p(z | x)) = E[\log(q_\phi(z | x))] - E[\log(p(z | x))] 
+                                = E[\log(q(z | x))] - E[\log(p(x, z))] + \log p(x)
+\\]
 
 where the expectations are over $z$. Since the evidence is incomputable (and
 also constant across choices of $q$), we instead minimize the ELBO
-\[ELBO(q) = -E[\log(q(z | x))] + E[\log(p(x,z))]
+
+\\[ELBO(q) = -E[\log(q(z | x))] + E[\log(p(x,z))]
           = -E[\log(q(z | x))] + E[\log(p(x|z))] + E[\log(p(z))]
           = -KL(q(z | x) || p(z)) + E[\log(p(x|z))]
-\]
+\\]
 
 In the particular case of variational autoencoders, note that the ELBO depends
 not only on $\phi$, but also on the parameters $\theta$ of the generative model
 (specifically, the parameters of the prior on $z$ and of the conditional 
 probabilities $p(x | z)$). We therefore will going forward write it instead as
-\[ELBO(\phi, \theta) = -KL(q_\phi(z|x) || p_\theta(z)) + E[\log(p\theta(x|z))]\]
+
+\\[ELBO(\phi, \theta) = -KL(q_\phi(z|x) || p_\theta(z)) + E[\log(p\theta(x|z))]\\]
 
 Great! Now that we have established the objective function, we just need a way
 to optimize against it. We'll do so using gradient descent on minibatches of
@@ -141,12 +150,13 @@ of elucidating exactly how the gradients are computed.
 Since we chose $q\phi(z | x) = \mathcal{N}(z; \mu(x, \phi), \sigma(x, \phi))$
 and $p(z) = \mathcal{N}(z; 0, I)$, we can actually analytically compute the
 KL divergence term to get the expression:
-\[ELBO(\phi, \theta) = 
+
+\\[ELBO(\phi, \theta) = 
     (\frac{1}{2} \sum{j=1}{J} (1 + \log(\sigma(x, \phi)_j^2) - 
                                    \mu(x, \phi)_j^2 -
                                    \sigma(x, \phi)_j^2)) +
     E\phi[\log(p\theta(x|z))]
-\]
+\\]
 
 This means, in particular, that the gradient of the KL divergence can be 
 computed analytically; however, we need to compute the gradient of the latter 
@@ -166,10 +176,11 @@ which in this case we do as $g\phi(\epsilon, x) = \mu\phi(x) + \sigma\phi(x)\eps
 where $\epsilon \sim \mathcal{N}(0, I)$. In particular, this allows us to write:
 
 We can then compute the overall gradient at each step by
-(1) sampling a minibatch of observations
-(2) sampling an epsilon from the noise distribution
-(3) computing each of the gradients
-(4) following your update algorithm to update parameters given the gradients
+
+1. sampling a minibatch of observations
+2. sampling an epsilon from the noise distribution
+3. computing each of the gradients
+4. following your update algorithm to update parameters given the gradients
 
 ### Experiment: demonstrate variance reduction of reparametrization trick
 
