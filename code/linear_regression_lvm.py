@@ -182,14 +182,17 @@ def vb_initialize_parameters(M, K):
 def _reparametrize_noise(batch, noise, vb_params):
     mu = torch.mm(batch, vb_params.beta_q)
 
-    _, K = noise.size()[1]
+    _, K = noise.size()
     identity = make_torch_variable(np.identity(K), False)
     sigma = torch.mul(vb_params.sigma_q ** 2, identity)
 
-    return mu + sigma * noise
+    return mu + torch.mm(noise, sigma)
 
 
 def vb_estimate_lower_bound(batch, noise, vb_params):
+    if not isinstance(vb_params, VB_PARAMS):
+        raise ValueError('parameter tuple must be of type VB_PARAMS')
+
     B, M = batch.size()
     B_1, K = noise.size()
 
@@ -228,7 +231,7 @@ def vb_forward_step(x, vb_params, B, learning_rate):
     noise = _reparametrize_noise(batch, noise, vb_params)
 
     # Estimate marginal likelihood of batch
-    neg_lower_bound = -1 * vb_estimate_lower_bound(batch, noise, vb_params)
+    neg_lower_bound = vb_estimate_lower_bound(batch, noise, vb_params)
 
     # Do a backward step
     neg_lower_bound.backward()
