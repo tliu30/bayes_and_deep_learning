@@ -166,6 +166,28 @@ def mle_forward_step(x, mle_params, B, sub_B, learning_rate):
     return mle_params, neg_marginal_log_lik
 
 
+def mle_forward_step_w_optim(x, mle_params, B, sub_B, optimizer):
+    # Create minibatch
+    batch = select_minibatch(x, B)
+
+    # Estimate marginal likelihood of batch
+    neg_marginal_log_lik = -1 * mle_estimate_batch_likelihood(batch, mle_params, sub_B)
+
+    # Do a backward step
+    neg_marginal_log_lik.backward()
+
+    # Do a step
+    optimizer.step()
+
+    # Constrain sigma
+    mle_params.sigma.data[0] = max(1e-10, mle_params.sigma.data[0])
+
+    # Clear gradients
+    optimizer.zero_grad()
+
+    return mle_params, neg_marginal_log_lik
+
+
 # Methods for variational bayes fitting
 
 VB_PARAMS = namedtuple('VB_PARAMS', ['beta', 'sigma', 'beta_q', 'sigma_q'])
@@ -245,5 +267,33 @@ def vb_forward_step(x, vb_params, B, learning_rate):
 
     # Clear gradients
     clear_gradients_parameter_tuple(vb_params)
+
+    return vb_params, neg_lower_bound
+
+
+def vb_forward_step_w_optim(x, vb_params, B, optimizer):
+    # Create minibatch
+    batch = select_minibatch(x, B)
+
+    # Sample noise
+    K, _ = vb_params.beta.size()
+    noise = make_torch_variable(np.random.randn(B, K), False)
+    noise = _reparametrize_noise(batch, noise, vb_params)
+
+    # Estimate marginal likelihood of batch
+    neg_lower_bound = vb_estimate_lower_bound(batch, noise, vb_params)
+
+    # Do a backward step
+    neg_lower_bound.backward()
+
+    # Update step
+    optimizer.step()
+
+    # Constrain sigma
+    vb_params.sigma.data[0] = max(1e-10, vb_params.sigma.data[0])
+    vb_params.sigma_q.data[0] = max(1e-10, vb_params.sigma_q.data[0])
+
+    # Clear gradients
+    optimizer.zero_grad()
 
     return vb_params, neg_lower_bound
