@@ -188,6 +188,123 @@ def mle_forward_step_w_optim(x, mle_params, B, sub_B, optimizer):
     return mle_params, neg_marginal_log_lik
 
 
+# Maximum likelihood - marginalizing out x
+
+def compute_var(beta, sigma):
+    '''Computes M = t(W) * W + sigma^2 * I, which is a commonly used quantity'''
+    identity = make_torch_variable(np.identity(M), False)
+    a1 = torch.mm(beta.t(), beta)
+    a2 = torch.mul(sigma ** 2, identity)
+    return torch.add(a1 + a2)
+
+
+def mle_estimate_batch_likelihood_v2(batch, mle_params):
+    if not isinstance(mle_params, MLE_PARAMS):
+        raise ValueError('Input params must be of type MLE_PARAMS')
+
+    B, M = batch.size()
+
+    mu = make_torch_variable(np.zeros(M), False)
+    sigma = compute_var(mle_params.beta, mle_params.sigma)
+
+    approx_marginal_log_likelihood = mvn.torch_mvn_density(batch, mu, sigma, True)
+
+    return approx_marginal_log_likelihood
+
+
+# Expectation maximization
+
+def em_compute_posterior(batch, em_params):
+    '''Computes the first and second moments of P(y | x)'''
+    B, M = batch.size()
+    K, _ = em_params.beta.size()
+
+    var_inv = torch.inv(compute_var(em_params.beta.t(), em_params.sigma))
+
+    var_inv_ = var_inv.unsqueeze(0).expand(B, K, K) # K x K --> B x K x K
+    beta_ = em_params.beta.unsqueeze(0).expand(B, K, M)  # K x M --> B x K x M
+    batch_ = batch.unsqueeze(2)  # B x M --> B x M x 1
+
+    # (B x K x K) * (B x K x M) * (B x M x 1) --> (B x K x 1)  --> (B x K)
+    e_y = torch.bmm(var_inv_, torch.bmm(beta_, batch_)).squeeze(2)
+
+    e_y_ = e_y.unsqueeze(2)  # (B x K) --> (B x K x 1)
+    e_y_t_ = e_y.unsqueeze(1)  # (B x K) --> (B x 1 x K)
+
+    a_1_ = torch.mul(em_params.sigma ** 2, var_inv_) # B x K x K
+    a_2_ = torch.bmm(e_y_, e_y_t_)  # (K x 1) * (1 x K) --> B x K x K
+    e_y2 = torch.add(a_1_, a_2_)
+
+    return e_y, e_y2
+
+
+def extract_diagonals(batch_matrices):
+    '''Get diagonal out of a batch of square matrices (B x M x M) --> (B x M)'''
+    B, I, I = batch_matrices.size()
+    return torch.cat([batch_matrices[b, :, :].diag().unsqueeze(0) for b in range(B)], dim=0)
+
+
+def em_compute_full_data_log_likelihood(batch, em_params, post_e_y, post_e_y2):
+    B, M = batch.size()
+    K, _ = em_params.beta.size()
+
+    batch_ = batch.unsqueeze(2)  # B x M --> B x M x 1
+    batch_t_ = batch.unsqueeze(2)  # B x M --> B x 1 x M
+    beta_ = em_params.beta.unsqueeze(0).expand(B, K, M)  # K x M --> B x K x M
+    beta_t_ = em_params.beta.t().unsqueeze(0).expand(B, K, M)  # K x M --> M x K --> B x M x K
+    post_e_y_t_ = post_e_y.unsqueeze(1)  # B x K --> B x 1 x K
+
+    # shape 1
+    a_1 = torch.mul(M / 2.0, torch.log(em_params.sigma ** 2))
+
+    # shape 1
+    a_2 = torch.mul(0.5, post_e_y2.diag().sum())
+
+    # (B x 1 x M) * (B x M x 1) --> B x 1 x1
+    a_3_1 = torch.mul(0.5, em_params.sigma ** -2)
+    a_3_2 = torch.bmm(batch_t_, batch_)
+    a_3 = torch.mul(a_3_1, a_3_2)
+
+    # (B x 1 x K) * (B x K x M) * (B x M x 1) --> B x 1 x 1
+    a_4_1 = torch.mul(-1, em_params.sigma ** -2)
+    a_4_2 = torch.bmm(post_e_y_t_, torch.bmm(beta_, batch_))
+    a_4 = torch.mul(a_4_1, a_4_2)
+
+    # (B x K x M) * (B x M x K) * (B x K x K) -- (B x K x K) --> (B x 1)
+    a_5_1 = torch.mul(0.5, em_params.sigma ** -2)
+    a_5_2 = torch.bmm(beta_, torch.bmm(beta_t_, post_e_y2))
+    a_5 = torch.mul(a_5_1, extract_diagonals(a_5_2).sum(axis=1))
+
+    full_data_log_likelihood = torch.mul(-1.0, a_1 + a_2 + a_3 + a_4 + a_5)
+
+    return full_data_log_likelihood
+
+
+def em_forward_step(x, em_params, B, optimizer):
+    # Create minibatch
+    batch = select_minibatch(x, B)
+
+    # Compute posterior
+    e_y, e_y2 = em_compute_posterior(batch, em_params)
+
+    # Use posterior to construct full data log likelihood as function of em_params
+    full_data_log_likelihood = em_compute_full_data_log_likelihood(batch, em_params, e_y, e_y2)
+
+    # Do a backward step
+    torch.mul(-1 * full_data_log_likelihood).backward()
+
+    # Update step
+    optimizer.step()
+
+    # Constrain sigma
+    em_params.sigma.data[0] = max(1e-10, em_params.sigma.data[0])
+
+    # Clear gradients
+    optimizer.zero_grad()
+
+    return em_params, full_data_log_likelihood
+
+
 # Methods for variational bayes fitting
 
 VB_PARAMS = namedtuple('VB_PARAMS', ['beta', 'sigma', 'beta_q', 'sigma_q'])
