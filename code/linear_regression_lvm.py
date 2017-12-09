@@ -20,6 +20,7 @@ import torch
 from torch.autograd import Variable
 
 from code import mvn
+from code.mvn import torch_determinant
 
 logger = logging.getLogger(__name__)
 
@@ -188,14 +189,15 @@ def mle_forward_step_w_optim(x, mle_params, B, sub_B, optimizer):
     return mle_params, neg_marginal_log_lik
 
 
-# Maximum likelihood - marginalizing out x
+# Maximum likelihood - marginalizing out z
 
 def compute_var(beta, sigma):
     '''Computes M = t(W) * W + sigma^2 * I, which is a commonly used quantity'''
+    _, M = beta.size()
     identity = make_torch_variable(np.identity(M), False)
     a1 = torch.mm(beta.t(), beta)
     a2 = torch.mul(sigma ** 2, identity)
-    return torch.add(a1 + a2)
+    return torch.add(a1, a2)
 
 
 def mle_estimate_batch_likelihood_v2(batch, mle_params):
@@ -209,33 +211,125 @@ def mle_estimate_batch_likelihood_v2(batch, mle_params):
 
     approx_marginal_log_likelihood = mvn.torch_mvn_density(batch, mu, sigma, True)
 
+    return approx_marginal_log_likelihood.sum()
+
+
+def mle_forward_step_w_optim_v2(x, mle_params, B, optimizer):
+    # Create minibatch
+    batch = select_minibatch(x, B)
+
+    # Estimate marginal likelihood of batch
+    neg_marginal_log_lik = -1 * mle_estimate_batch_likelihood_v2(batch, mle_params)
+
+    # Do a backward step
+    neg_marginal_log_lik.backward()
+
+    # Do a step
+    optimizer.step()
+
+    # Constrain sigma
+    mle_params.sigma.data[0] = max(1e-10, mle_params.sigma.data[0])
+
+    # Clear gradients
+    optimizer.zero_grad()
+
+    return mle_params, neg_marginal_log_lik
+
+
+# Marginalize out beta and compute marginal likelihood
+
+MLE_PARAMS_2 = namedtuple('MLE_PARAMS_2', ['z', 'sigma', 'alpha'])
+
+
+def mle_initialize_parameters(N, M, K):
+    '''Initialize the parameters before fitting'''
+    z = make_torch_variable(np.random.randn(N, K), True)
+    sigma = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    alpha = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    return MLE_PARAMS_2(z=z, sigma=sigma, alpha=alpha)
+
+
+def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
+    B = batch_ix.shape[0]
+    _, M = x.size()
+    _, K = mle_params_2.z.size()
+
+    batch_x = x[batch_ix, :]  # B x M
+    batch_z = mle_params_2.z[batch_ix, :]  # B x K
+
+    # ### Construct variance
+    dot = torch.mm(batch_z, batch_z.t())  # (B x K) * (K x B) --> (B x B)
+    identity = make_torch_variable(np.identity(B), False)
+    var = torch.add(
+        torch.mul(mle_params_2.alpha ** 2, dot),
+        torch.mul(mle_params_2.sigma ** 2, identity)
+    )
+
+    # ### Compute log lik
+    var_det = torch_determinant(var)
+    var_inv = torch.inverse(var)
+
+    # Determinant component
+    a_1 = -0.5 * M * torch.log(var_det)
+
+    # Exponent - trace of (B x B) * (B x M) * (M x B) - (B x B)
+    a_2 = -0.5 * torch.mm(var_inv, torch.mm(batch_x, batch_x.t())).diag().sum()
+
+    approx_marginal_log_likelihood = (a_1 + a_2)
+
     return approx_marginal_log_likelihood
+
+
+def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
+    # Create minibatch
+    N, _ = x.shape
+    batch_ix = np.random.choice(range(N), B, replace=True)
+
+    # Estimate marginal likelihood of batch
+    neg_marginal_log_lik = -1 * mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params)
+
+    # Do a backward step
+    neg_marginal_log_lik.backward()
+
+    # Do a step
+    optimizer.step()
+
+    # Constrain sigma
+    mle_params.sigma.data[0] = max(1e-10, mle_params.sigma.data[0])
+
+    # Clear gradients
+    optimizer.zero_grad()
+
+    return mle_params, neg_marginal_log_lik
 
 
 # Expectation maximization
 
+EM_PARAMS = namedtuple('EM_PARAMS', ['beta', 'sigma'])
+
+
 def em_compute_posterior(batch, em_params):
-    '''Computes the first and second moments of P(y | x)'''
+    '''Computes the first and second moments of P(z | x)'''
     B, M = batch.size()
     K, _ = em_params.beta.size()
 
-    var_inv = torch.inv(compute_var(em_params.beta.t(), em_params.sigma))
+    var_inv = torch.inverse(compute_var(em_params.beta.t(), em_params.sigma))
 
     var_inv_ = var_inv.unsqueeze(0).expand(B, K, K) # K x K --> B x K x K
     beta_ = em_params.beta.unsqueeze(0).expand(B, K, M)  # K x M --> B x K x M
     batch_ = batch.unsqueeze(2)  # B x M --> B x M x 1
 
     # (B x K x K) * (B x K x M) * (B x M x 1) --> (B x K x 1)  --> (B x K)
-    e_y = torch.bmm(var_inv_, torch.bmm(beta_, batch_)).squeeze(2)
+    e_z = torch.bmm(var_inv_, torch.bmm(beta_, batch_)).squeeze(2)
 
-    e_y_ = e_y.unsqueeze(2)  # (B x K) --> (B x K x 1)
-    e_y_t_ = e_y.unsqueeze(1)  # (B x K) --> (B x 1 x K)
+    e_z_ = e_z.unsqueeze(2)  # (B x K) --> (B x K x 1)
+    e_z_t_ = e_z.unsqueeze(1)  # (B x K) --> (B x 1 x K)
 
     a_1_ = torch.mul(em_params.sigma ** 2, var_inv_) # B x K x K
-    a_2_ = torch.bmm(e_y_, e_y_t_)  # (K x 1) * (1 x K) --> B x K x K
-    e_y2 = torch.add(a_1_, a_2_)
+    a_2_ = torch.bmm(e_z_, e_z_t_)  # (K x 1) * (1 x K) --> B x K x K
+    e_z2 = torch.add(a_1_, a_2_)
 
-    return e_y, e_y2
+    return e_z, e_z2
 
 
 def extract_diagonals(batch_matrices):
@@ -249,33 +343,35 @@ def em_compute_full_data_log_likelihood(batch, em_params, post_e_y, post_e_y2):
     K, _ = em_params.beta.size()
 
     batch_ = batch.unsqueeze(2)  # B x M --> B x M x 1
-    batch_t_ = batch.unsqueeze(2)  # B x M --> B x 1 x M
+    batch_t_ = batch.unsqueeze(1)  # B x M --> B x 1 x M
     beta_ = em_params.beta.unsqueeze(0).expand(B, K, M)  # K x M --> B x K x M
     beta_t_ = em_params.beta.t().unsqueeze(0).expand(B, K, M)  # K x M --> M x K --> B x M x K
     post_e_y_t_ = post_e_y.unsqueeze(1)  # B x K --> B x 1 x K
 
     # shape 1
-    a_1 = torch.mul(M / 2.0, torch.log(em_params.sigma ** 2))
+    a_1 = M / 2.0 * torch.log(em_params.sigma ** 2)
 
-    # shape 1
-    a_2 = torch.mul(0.5, post_e_y2.diag().sum())
+    # shape B x 1 x1
+    a_2 = 0.5 * extract_diagonals(post_e_y2).sum(dim=1)  # B x K x K --> B,
+    a_2 = a_2.unsqueeze(1).unsqueeze(2)  # B --> B x 1 x 1
 
-    # (B x 1 x M) * (B x M x 1) --> B x 1 x1
-    a_3_1 = torch.mul(0.5, em_params.sigma ** -2)
+    # (B x 1 x M) * (B x M x 1) --> B x 1 x 1
+    a_3_1 = 0.5 * (em_params.sigma ** -2)
     a_3_2 = torch.bmm(batch_t_, batch_)
     a_3 = torch.mul(a_3_1, a_3_2)
 
     # (B x 1 x K) * (B x K x M) * (B x M x 1) --> B x 1 x 1
-    a_4_1 = torch.mul(-1, em_params.sigma ** -2)
+    a_4_1 = -1 * (em_params.sigma ** -2)
     a_4_2 = torch.bmm(post_e_y_t_, torch.bmm(beta_, batch_))
     a_4 = torch.mul(a_4_1, a_4_2)
 
     # (B x K x M) * (B x M x K) * (B x K x K) -- (B x K x K) --> (B x 1)
-    a_5_1 = torch.mul(0.5, em_params.sigma ** -2)
+    a_5_1 = 0.5 * (em_params.sigma ** -2)  # Dim 1,
     a_5_2 = torch.bmm(beta_, torch.bmm(beta_t_, post_e_y2))
-    a_5 = torch.mul(a_5_1, extract_diagonals(a_5_2).sum(axis=1))
+    a_5 = torch.mul(a_5_1, extract_diagonals(a_5_2).sum(dim=1))
+    a_5 = a_5.unsqueeze(1).unsqueeze(2)
 
-    full_data_log_likelihood = torch.mul(-1.0, a_1 + a_2 + a_3 + a_4 + a_5)
+    full_data_log_likelihood = (a_1 + a_2 + a_3 + a_4 + a_5).sum()
 
     return full_data_log_likelihood
 
