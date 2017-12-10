@@ -82,3 +82,21 @@ def torch_mvn_density(x, mu, sigma, log=False):
         density = normalization_constant * exponent
 
     return density
+
+
+def torch_gp_mvn_log_density(x, sigma, sigma_det=None, sigma_inv=None):
+    '''In GPs, we want to sample across the columns (e.g., features) rather than rows
+
+    This should be equivalent to computing the torch_mvn_density, but i'm failing atm
+    '''
+    _, m = x.size()
+
+    sigma_det = torch_determinant(sigma) if sigma_det is None else sigma_det
+    sigma_inv = torch.inverse(sigma) if sigma_inv is None else sigma_inv
+
+    a_1 = m * torch.log(sigma_det)
+    a_2 = torch.mm(sigma_inv, torch.mm(x, x.t())).diag().sum()
+
+    log_likelihood = -0.5 * (a_1 + a_2)
+
+    return log_likelihood

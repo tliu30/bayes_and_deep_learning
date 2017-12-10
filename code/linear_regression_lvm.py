@@ -267,16 +267,7 @@ def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
     )
 
     # ### Compute log lik
-    var_det = torch_determinant(var)
-    var_inv = torch.inverse(var)
-
-    # Determinant component
-    a_1 = -0.5 * M * torch.log(var_det)
-
-    # Exponent - trace of (B x B) * (B x M) * (M x B) - (B x B)
-    a_2 = -0.5 * torch.mm(var_inv, torch.mm(batch_x, batch_x.t())).diag().sum()
-
-    approx_marginal_log_likelihood = (a_1 + a_2)
+    approx_marginal_log_likelihood = mvn.torch_gp_mvn_log_density(batch_x, var)
 
     return approx_marginal_log_likelihood
 

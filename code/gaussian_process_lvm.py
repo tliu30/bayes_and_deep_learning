@@ -23,7 +23,7 @@ import torch
 
 # Kernel functions
 from code.linear_regression_lvm import make_torch_variable
-from code.mvn import torch_determinant
+from code.mvn import torch_determinant, torch_gp_mvn_log_density
 
 
 def rbf_kernel_forward(x1, x2, log_lengthscale, eps=1e-5):
@@ -73,12 +73,7 @@ def _mle_likelihood(x, z, alpha, sigma, log_l, eps=1e-5):
     cov = torch.add(torch.mul(alpha ** 2, inner_product), torch.mul(sigma ** 2, identity))
 
     # Compute log lik
-    cov_det = torch_determinant(cov)
-    cov_inv = torch.inverse(cov)
-
-    a_1 = np.log(cov_det)
-    a_2 = torch.mm(cov_inv, torch.mm(x, x.t())).diag().sum()
-    approx_marginal_log_likelihood = a_1 + a_2
+    approx_marginal_log_likelihood = torch_gp_mvn_log_density(x, cov)
 
     return approx_marginal_log_likelihood
 
