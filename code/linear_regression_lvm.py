@@ -250,6 +250,7 @@ def mle_initialize_parameters(N, M, K):
 
 
 def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
+    '''e.g., Y | x ~ N(0, alpha**2 t(x) x + sigma**2 I); treats each dimension independently'''
     B = batch_ix.shape[0]
     _, M = x.size()
     _, K = mle_params_2.z.size()
