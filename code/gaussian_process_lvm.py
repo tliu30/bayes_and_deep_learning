@@ -90,6 +90,7 @@ def mle_batch_likelihood(x, mle_params, batch_ix):
 
 
 def mle_forward_step_w_optim(x, mle_params, b, optimizer):
+    '''This is naive minibatch optimiziation of MLE...'''
     # Create batch
     n, _ = x.shape
     batch_ix = np.random.choice(range(n), b, replace=True)
@@ -113,3 +114,25 @@ def mle_forward_step_w_optim(x, mle_params, b, optimizer):
     optimizer.zero_grad()
 
     return mle_params, neg_log_lik
+
+
+# Implement Lawrence GPLVM active / inactive algorithm
+
+
+def _active_step(x, mle_params, active_ix, optimizer_kernel):
+    active_x = x[active_ix, :]
+    active_z = mle_params.z[active_ix, :]
+
+
+
+
+def mle_active_inactive_step_w_optim(x, mle_params, b, optimizer_kernel, optimizer_latent):
+    '''From GPLVMs for Visualiation of High Dimensional Data by Neil Lawrence'''
+    # Create batch (they use informative vector machine [IVM] but i'm lazy)
+    n, _ = x.shape
+    active_ix = np.random.choice(range(n), b, replace=False)  # w/o replacement!
+
+    # Optimize kernel parameters given the active set
+
+
+
