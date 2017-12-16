@@ -21,10 +21,11 @@ from collections import namedtuple
 import numpy as np
 import torch
 
-# Kernel functions
 from code.linear_regression_lvm import make_torch_variable
-from code.mvn import torch_determinant, torch_gp_mvn_log_density, torch_mvn_density
+from code.mvn import torch_gp_mvn_log_density, torch_mvn_density
 
+
+# Kernel functions
 
 def rbf_kernel_forward(x1, x2, log_lengthscale, eps=1e-5):
     '''Compute the distance matrix under rbf kernel; taken from github repo jrg365/gpytorch
@@ -63,6 +64,23 @@ MLE_PARAMS = namedtuple('MLE_PARAMS', ['z', 'alpha', 'sigma', 'log_l'])
 
 
 def _make_cov(x1, x2, alpha, sigma, log_l):
+    '''Construct the RBF covariance matrix for observations drawn from a gaussian process
+
+    In particular, we compute K(x1, x2) + sigma ** 2, e.g., the covariance between each point
+    in x1 with each point in x2 given the parameters.
+
+    where k(x1, x2) = alpha * exp(-0.5 * l * (t(x1) * x2))
+
+    Args:
+        x1: (Variable) the first set of points; shape N1 x M
+        x2: (Variable) the second set of points; shape N2 x M
+        alpha: (Variable) scale parameter for the RBF
+        sigma: (Variable) observation noise
+        log_l: (Variable) log length parameter for RBF
+
+    Returns:
+        (Variable) with shape N1 x N2
+    '''
     n1, _ = x1.size()
     n2, _ = x2.size()
 
@@ -91,6 +109,7 @@ def _mle_log_likelihood(x, z, alpha, sigma, log_l):
 
 
 def mle_batch_log_likelihood(x, mle_params, batch_ix):
+    '''Compute log likelihood given latent variables and parameters'''
     batch_x = x[batch_ix, :]
     batch_z = mle_params.z[batch_ix, :]
     return _mle_log_likelihood(batch_x, batch_z, mle_params.alpha, mle_params.sigma, mle_params.log_l)
@@ -198,6 +217,7 @@ def _inactive_point_likelihood(active_x, active_z, inactive_x, inactive_z, alpha
 
 
 def inactive_point_likelihood(x, mle_params, active_ix, inactive_ix):
+    '''Wrapper around the other function'''
     active_x = x[active_ix, :]
     active_z = mle_params.z[active_ix, :]
 
@@ -211,7 +231,14 @@ def inactive_point_likelihood(x, mle_params, active_ix, inactive_ix):
 
 
 def mle_active_inactive_step_w_optim(x, mle_params, b, optimizer_kernel, optimizer_latent):
-    '''From GPLVMs for Visualiation of High Dimensional Data by Neil Lawrence'''
+    '''From GPLVMs for Visualiation of High Dimensional Data by Neil Lawrence
+
+
+    1. Split data in to active & inactive set
+    2. Restricting to active set, learn parameters of the kernel
+    3. Using active set and fixing kernel parameters, estimate latent variables of inactive set
+    4. Rinse and repeat
+    '''
     # Create batch (they use informative vector machine [IVM] but i'm lazy)
     n, _ = x.shape
     active_ix = np.random.choice(range(n), b, replace=False)  # w/o replacement!
@@ -248,6 +275,7 @@ VB_PARAMS = namedtuple(
 
 
 def _vb_lower_bound(x, noise, alpha, sigma, log_l, alpha_q, sigma_q, log_l_q):
+    '''Compute variational lower bound'''
 
     B, M1 = x.size()
     _, M2 = noise.size()
@@ -272,6 +300,7 @@ def _vb_lower_bound(x, noise, alpha, sigma, log_l, alpha_q, sigma_q, log_l_q):
 
 
 def vb_lower_bound(x, noise, vb_params):
+    '''Compute variational lower bound'''
     return _vb_lower_bound(
         x, noise,
         vb_params.alpha, vb_params.sigma, vb_params.log_l,
@@ -310,6 +339,7 @@ def _reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, alpha_q
 
 
 def reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, vb_params):
+    '''Using an active set to give some definition to GP draw, reparam N(0, 1) noise given batch'''
     return _reparametrize_noise(
         inactive_x, inactive_noise, active_x, active_z,
         vb_params.alpha_q, vb_params.sigma_q, vb_params.log_l_q
