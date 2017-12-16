@@ -289,8 +289,8 @@ def _vb_lower_bound(x, noise, alpha, sigma, log_l, alpha_q, sigma_q, log_l_q):
     log_likelihood = torch_gp_mvn_log_density(x, cov_x)
 
     # Prior under model
-    mu_prior = make_torch_variable(np.zeros(M2), False)
-    sigma_prior = make_torch_variable(np.identity(M2), False)
+    mu_prior = make_torch_variable(np.zeros(M2), requires_grad=False)
+    sigma_prior = make_torch_variable(np.identity(M2), requires_grad=False)
     log_prior = torch_mvn_density(noise, mu_prior, sigma_prior, log=True)
 
     # Compute lower bound
