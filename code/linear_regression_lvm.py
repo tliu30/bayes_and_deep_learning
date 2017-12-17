@@ -20,6 +20,7 @@ import torch
 from torch.autograd import Variable
 
 from code import mvn
+from code import utils
 from code.mvn import torch_determinant
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ def _mle_expand_batch(variable, sub_B):
 
 def _mle_unpack_likelihood(variable, sub_B, B):
     '''Unpack likelihood from (N * M, ) to (N, M) s.t. (n + m * N, ) --> (n, m)'''
-    mvn.check_autograd_variable_size(variable, [(sub_B * B, )])
+    utils.check_autograd_variable_size(variable, [(sub_B * B,)])
     return variable.view(sub_B, B)
 
 
@@ -113,14 +114,14 @@ def mle_estimate_batch_likelihood(batch, mle_params, sub_B, test_noise=None):
         raise AssertionError('batch and beta do not agree on M ({} vs {})'
                              .format((B, M), (K, M_1)))
 
-    mvn.check_autograd_variable_size(mle_params.sigma, [(1, )])
+    utils.check_autograd_variable_size(mle_params.sigma, [(1,)])
 
     # ### Computation
 
     # Sample noise required to compute monte carlo estimate of likelihood
     noise = make_torch_variable(np.random.randn(sub_B * B, K), False)
     if test_noise is not None:  # For debugging, allow insertion of a deterministic noise variable
-        mvn.check_autograd_variable_size(test_noise, [(sub_B * B, K)])
+        utils.check_autograd_variable_size(test_noise, [(sub_B * B, K)])
         noise = test_noise
 
     # Expand minibatch to match shape of noise
@@ -135,7 +136,7 @@ def mle_estimate_batch_likelihood(batch, mle_params, sub_B, test_noise=None):
     likelihood = mvn.torch_mvn_density(batch, mu, sigma)
 
     # Reshape density to (sub_B, B) and sum across first dimension
-    mvn.check_autograd_variable_size(likelihood, [(sub_B * B, )])
+    utils.check_autograd_variable_size(likelihood, [(sub_B * B,)])
     likelihood = _mle_unpack_likelihood(likelihood, sub_B, B)
 
     # Compute approx expected likelihood of each batch sample

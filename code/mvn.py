@@ -2,6 +2,8 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 
+from code.utils import check_autograd_variable_size
+
 
 # ### Matrix computation utilities (needed in particular to compute determinant)
 
@@ -43,14 +45,6 @@ class Cholesky(torch.autograd.Function):
 def torch_determinant(square_matrix):
     '''Compute the determinant of the matrix in a autodiff-friendly way'''
     return Cholesky.apply(square_matrix).diag().prod() ** 2
-
-
-def check_autograd_variable_size(variable, size_tuples):
-    size_arrays = [np.array(tup) for tup in size_tuples]
-    found_size = variable.data.size()
-    matches = [all(found_size == array) for array in size_arrays]
-    if not any(matches):
-        raise ValueError('expected {} but found {}'.format(size_tuples, found_size))
 
 
 # ### Multivariate normal density computation
