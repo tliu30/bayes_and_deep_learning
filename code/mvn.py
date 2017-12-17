@@ -55,10 +55,11 @@ def torch_mvn_density(x, mu, sigma, log=False):
     Args:
         x: (torch.Variable) dimension (B, M)
         mu: (torch.Variable) dimension (M, ), (1, M), or (B, M)
-        sigma: (torch.Variable) dimension M x M 
+        sigma: (torch.Variable) dimension M x M
+        log: (bool) if True, return log densities (default False)
 
     Returns:
-        densities: (torch.Variable) dimension
+        densities: (torch.Variable) dimension (B, )
     '''
     # Input validation
     B, M = x.data.size()
