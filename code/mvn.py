@@ -3,22 +3,35 @@ import torch
 from torch.autograd import Variable
 
 
+# ### Matrix computation utilities (needed in particular to compute determinant)
+
 class Cholesky(torch.autograd.Function):
-    '''Stolen from py torch forums'''
+    '''Implement forward and backward directions for Cholesky decomposition (from pytorch forums)'''
+    # NOTE: Not tested right now...mostly b/c I don't know how to test the derivative
 
     @staticmethod
     def forward(ctx, a):
+        '''If A is a Hermitian positive-definite matrix, finds L such that A = LL^*'''
+        # For this, we can just use the bindings for BLAS
         l = torch.potrf(a, False)
+
+        # Save for backward step
         ctx.save_for_backward(l)
+
         return l
 
     @staticmethod
     def backward(ctx, grad_output):
+        '''Compute corresponding derivative'''
+        # Retrieve L as computed in the forward step & compute it's inverse
         l, = ctx.saved_variables
-        
-        linv =  l.inverse()
-        
-        inner = torch.tril(torch.mm(l.t(),grad_output))*torch.tril(1.0-Variable(l.data.new(l.size(1)).fill_(0.5).diag()))
+        linv = l.inverse()
+
+        # Do a lot of math
+        a = torch.tril(torch.mm(l.t(), grad_output))
+        b = torch.tril(1.0 - Variable(l.data.new(l.size(1)).fill_(0.5).diag()))
+        inner = a * b
+
         s = torch.mm(linv.t(), torch.mm(inner, linv))
 
         # could re-symmetrise 
@@ -28,6 +41,7 @@ class Cholesky(torch.autograd.Function):
 
 
 def torch_determinant(square_matrix):
+    '''Compute the determinant of the matrix in a autodiff-friendly way'''
     return Cholesky.apply(square_matrix).diag().prod() ** 2
 
 
@@ -38,6 +52,8 @@ def check_autograd_variable_size(variable, size_tuples):
     if not any(matches):
         raise ValueError('expected {} but found {}'.format(size_tuples, found_size))
 
+
+# ### Multivariate normal density computation
 
 def torch_mvn_density(x, mu, sigma, log=False):
     '''Compute multivariate normal pdf at x
