@@ -2,8 +2,8 @@ import numpy as np
 import torch
 from torch import nn
 
-from code.linear_regression_lvm import make_torch_variable
 from code.mvn import torch_mvn_density
+from code.utils import make_torch_variable
 
 
 class FullyConnectedNN(nn.Module):

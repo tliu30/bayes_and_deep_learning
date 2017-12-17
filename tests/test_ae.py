@@ -5,7 +5,7 @@ from numpy.testing.utils import assert_array_almost_equal
 import torch
 
 from code.autoencoder import Autoencoder
-from code.linear_regression_lvm import make_torch_variable
+from code.utils import make_torch_variable
 
 
 class TestAutoencoder(unittest.TestCase):

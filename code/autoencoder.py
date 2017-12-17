@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
-from code.linear_regression_lvm import select_minibatch
+from code.utils import select_minibatch
 
 
 class Autoencoder(nn.Module):

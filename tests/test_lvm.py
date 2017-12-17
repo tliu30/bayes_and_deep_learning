@@ -4,6 +4,7 @@ import numpy as np
 from numpy.testing import assert_array_almost_equal
 import scipy.stats as ss
 
+from code import utils
 from code import linear_regression_lvm
 from code.linear_regression_lvm import compute_var
 
@@ -14,7 +15,7 @@ class TestLinearRegressionLVM(unittest.TestCase):
         '''Check that expands batch, then unpacks computation correctly'''
         N = 5
         x = np.arange(N).astype(float).reshape(-1, 1)  # e.g., N instances with 1 element
-        x_var = linear_regression_lvm.make_torch_variable(x, False)
+        x_var = utils.make_torch_variable(x, False)
 
         reps = 3
         test_expand = linear_regression_lvm._mle_expand_batch(x_var, reps)  # e.g., (3 * N, 1)
@@ -83,11 +84,11 @@ class TestLinearRegressionLVM(unittest.TestCase):
         truth_marginal_log_lik = np.log(expected_each_iter).sum()
 
         mle_params = linear_regression_lvm.MLE_PARAMS(
-            beta=linear_regression_lvm.make_torch_variable(beta, True),
-            sigma=linear_regression_lvm.make_torch_variable([sigma], True)
+            beta=utils.make_torch_variable(beta, True),
+            sigma=utils.make_torch_variable([sigma], True)
         )
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
-        noise_var = linear_regression_lvm.make_torch_variable(noise, False)
+        batch_var = utils.make_torch_variable(batch, False)
+        noise_var = utils.make_torch_variable(noise, False)
         test_marginal_log_lik = linear_regression_lvm.mle_estimate_batch_likelihood(
             batch_var, mle_params, sub_B, test_noise=noise_var
         )
@@ -102,8 +103,8 @@ class TestLinearRegressionLVM(unittest.TestCase):
     def test_compute_var(self):
         '''Make sure computing variance of posterior is autograd-able'''
         # Compute quantity
-        beta = linear_regression_lvm.make_torch_variable(np.array([[1, 1]]).astype(float), True)
-        sigma = linear_regression_lvm.make_torch_variable([1.0], True)
+        beta = utils.make_torch_variable(np.array([[1, 1]]).astype(float), True)
+        sigma = utils.make_torch_variable([1.0], True)
         var = compute_var(beta, sigma)
 
         # Check shape
@@ -137,10 +138,10 @@ class TestLinearRegressionLVM(unittest.TestCase):
         truth_marginal_log_lik = np.log(truth_marginal_lik).sum()
 
         mle_params = linear_regression_lvm.MLE_PARAMS(
-            beta=linear_regression_lvm.make_torch_variable(beta, True),
-            sigma=linear_regression_lvm.make_torch_variable([sigma], True)
+            beta=utils.make_torch_variable(beta, True),
+            sigma=utils.make_torch_variable([sigma], True)
         )
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
+        batch_var = utils.make_torch_variable(batch, False)
         test_marginal_log_lik = linear_regression_lvm.mle_estimate_batch_likelihood_v2(
             batch_var, mle_params
         )
@@ -179,11 +180,11 @@ class TestLinearRegressionLVM(unittest.TestCase):
         truth_marginal_log_lik = -0.5 * (a_0 + a_1 + a_2)
 
         mle_params_2 = linear_regression_lvm.MLE_PARAMS_2(
-            z=linear_regression_lvm.make_torch_variable(z, True),
-            sigma=linear_regression_lvm.make_torch_variable([sigma], True),
-            alpha=linear_regression_lvm.make_torch_variable([alpha], True)
+            z=utils.make_torch_variable(z, True),
+            sigma=utils.make_torch_variable([sigma], True),
+            alpha=utils.make_torch_variable([alpha], True)
         )
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
+        batch_var = utils.make_torch_variable(batch, False)
         batch_ix = np.array([0, 1, 2])
 
         test_marginal_log_lik = linear_regression_lvm.mle_estimate_batch_likelihood_v3(
@@ -227,10 +228,10 @@ class TestLinearRegressionLVM(unittest.TestCase):
             truth_e_z2[i, :, :] = (sigma ** 2) * var_inv + dot_prod
 
         em_params = linear_regression_lvm.EM_PARAMS(
-            beta=linear_regression_lvm.make_torch_variable(beta, True),
-            sigma=linear_regression_lvm.make_torch_variable([sigma], True)
+            beta=utils.make_torch_variable(beta, True),
+            sigma=utils.make_torch_variable([sigma], True)
         )
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
+        batch_var = utils.make_torch_variable(batch, False)
         test_e_z, test_e_z2 = linear_regression_lvm.em_compute_posterior(
             batch_var, em_params
         )
@@ -305,10 +306,10 @@ class TestLinearRegressionLVM(unittest.TestCase):
         truth_log_lik = truth_log_lik.sum()
 
         em_params = linear_regression_lvm.EM_PARAMS(
-            beta=linear_regression_lvm.make_torch_variable(beta, True),
-            sigma=linear_regression_lvm.make_torch_variable([sigma], True)
+            beta=utils.make_torch_variable(beta, True),
+            sigma=utils.make_torch_variable([sigma], True)
         )
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
+        batch_var = utils.make_torch_variable(batch, False)
         test_e_z, test_e_z2 = linear_regression_lvm.em_compute_posterior(
             batch_var, em_params
         )
@@ -340,12 +341,12 @@ class TestLinearRegressionLVM(unittest.TestCase):
         vb_params = linear_regression_lvm.VB_PARAMS(
             beta=None,
             sigma=None,
-            beta_q=linear_regression_lvm.make_torch_variable(beta_q, True),
-            sigma_q=linear_regression_lvm.make_torch_variable(sigma_q, True),
+            beta_q=utils.make_torch_variable(beta_q, True),
+            sigma_q=utils.make_torch_variable(sigma_q, True),
         )
 
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
-        noise_var = linear_regression_lvm.make_torch_variable(noise, False)
+        batch_var = utils.make_torch_variable(batch, False)
+        noise_var = utils.make_torch_variable(noise, False)
         reparam_noise = linear_regression_lvm._reparametrize_noise(batch_var, noise_var, vb_params)
 
         # Check values
@@ -404,13 +405,13 @@ class TestLinearRegressionLVM(unittest.TestCase):
         truth_lower_bound = (np.log(posterior) - np.log(likelihood) - np.log(prior)).sum()
 
         vb_params = linear_regression_lvm.VB_PARAMS(
-            beta=linear_regression_lvm.make_torch_variable(beta, True),
-            sigma=linear_regression_lvm.make_torch_variable([sigma], True),
-            beta_q=linear_regression_lvm.make_torch_variable(beta_q, True),
-            sigma_q=linear_regression_lvm.make_torch_variable([sigma_q], True)
+            beta=utils.make_torch_variable(beta, True),
+            sigma=utils.make_torch_variable([sigma], True),
+            beta_q=utils.make_torch_variable(beta_q, True),
+            sigma_q=utils.make_torch_variable([sigma_q], True)
         )
-        batch_var = linear_regression_lvm.make_torch_variable(batch, False)
-        noise_var = linear_regression_lvm.make_torch_variable(noise, False)
+        batch_var = utils.make_torch_variable(batch, False)
+        noise_var = utils.make_torch_variable(noise, False)
         test_lower_bound = linear_regression_lvm.vb_estimate_lower_bound(
             batch_var, noise_var, vb_params
         )
