@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from code.linear_regression_lvm import make_torch_variable
-from code.mvn import torch_gp_mvn_log_density, torch_mvn_density
+from code.mvn import torch_mvn_density
 
 
 # Kernel functions
@@ -103,7 +103,8 @@ def _mle_log_likelihood(x, z, alpha, sigma, log_l):
     cov = _make_cov(z, z, alpha, sigma, log_l)
 
     # Compute log lik
-    approx_marginal_log_likelihood = torch_gp_mvn_log_density(x, cov)
+    mu = make_torch_variable(np.zeros(n))
+    approx_marginal_log_likelihood = torch_mvn_density(x.t(), mu, cov)
 
     return approx_marginal_log_likelihood
 
@@ -281,12 +282,14 @@ def _vb_lower_bound(x, noise, alpha, sigma, log_l, alpha_q, sigma_q, log_l_q):
     _, M2 = noise.size()
 
     # Posterior under variational approximation
+    mu_z = make_torch_variable(np.zeros(B), requires_grad=False)
     cov_z = _make_cov(x, x, alpha_q, sigma_q, log_l_q)  # for f_q: X --> Z
-    log_posterior = torch_gp_mvn_log_density(noise, cov_z)
+    log_posterior = torch_mvn_density(noise.t(), mu_z, cov_z)
 
     # Likelihood under model
+    mu_x = make_torch_variable(np.zeros(B), requires_grad=False)
     cov_x = _make_cov(noise, noise, alpha, sigma, log_l)  # for f: Z --> X
-    log_likelihood = torch_gp_mvn_log_density(x, cov_x)
+    log_likelihood = torch_mvn_density(x.t(), mu_x, cov_x)
 
     # Prior under model
     mu_prior = make_torch_variable(np.zeros(M2), requires_grad=False)
