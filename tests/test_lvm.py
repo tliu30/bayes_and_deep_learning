@@ -170,9 +170,13 @@ class TestLinearRegressionLVM(unittest.TestCase):
         alpha = 1.0
 
         var = (alpha ** 2) * np.dot(z, z.T) + (sigma ** 2) * np.identity(N)
+
+        # These are the computations used in Lawrence's paper
+        # Serve as nice secondary verification that we are computing things correctly
+        a_0 = N * M * np.log(2 * np.pi)
         a_1 = M * np.log(np.linalg.det(var))
         a_2 = np.diag(np.dot(np.linalg.pinv(var), np.dot(batch, batch.T))).sum()
-        truth_marginal_log_lik = -0.5 * (a_1 + a_2)
+        truth_marginal_log_lik = -0.5 * (a_0 + a_1 + a_2)
 
         mle_params_2 = linear_regression_lvm.MLE_PARAMS_2(
             z=linear_regression_lvm.make_torch_variable(z, True),
@@ -181,9 +185,11 @@ class TestLinearRegressionLVM(unittest.TestCase):
         )
         batch_var = linear_regression_lvm.make_torch_variable(batch, False)
         batch_ix = np.array([0, 1, 2])
+
         test_marginal_log_lik = linear_regression_lvm.mle_estimate_batch_likelihood_v3(
             batch_var, batch_ix, mle_params_2
         )
+        test_marginal_log_lik = test_marginal_log_lik.sum()
 
         assert_array_almost_equal(truth_marginal_log_lik, test_marginal_log_lik.data.numpy())
 
