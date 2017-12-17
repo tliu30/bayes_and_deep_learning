@@ -21,7 +21,6 @@ from torch.autograd import Variable
 
 from code import mvn
 from code import utils
-from code.mvn import torch_determinant
 
 logger = logging.getLogger(__name__)
 
