@@ -21,7 +21,10 @@ from code import mvn
 from code import utils
 
 
-# Methods for maximum likelihood model fitting
+# ### Maximum likelihood estimation methods
+
+
+# Utilities
 
 MLE_PARAMS = namedtuple('MLE_PARAMS', ['beta', 'sigma'])
 
@@ -45,7 +48,37 @@ def _mle_unpack_likelihood(variable, sub_B, B):
     return variable.view(sub_B, B)
 
 
+#
+# Method 1:
+#
+# A naive approach - we directly try to estimate beta & sigma by maximizing
+#
+#    log P(x | beta, sigma^2) = sum_i log P(x_i | beta, sigma)
+#                             = sum_i E_z[log N(x_i; beta * z, sigma^2 * I)]
+#                    (approx) = sum_i (1 / J) sum_j log N(x_i; beta * z_j, sigma^2 * I)
+#
+# where we use monte carlo estimates of the log lik under the prior for z to compute
+# in turn, monte carlo estimates of the overall likelihood.
+#
+# Note that we are implicitly marginalizing z out here.
+#
+# We should expect this to be very slow...
+#
+
+
 def mle_estimate_batch_likelihood(batch, mle_params, sub_B, test_noise=None):
+    '''Compute batch likelihood under naive method
+
+    Args:
+        batch: (torch.autograd.Variable) the batch of inputs X
+        mle_params: (MLE_PARAMS torch.autograd.Variable tuple) the variables needed to compute
+        sub_B: (int) the size of the batches used for monte carlo estimates of E_z[log lik(x)]
+        test_noise: (torch.autograd.Variable) optional; introduce noise via function input instead
+                    of randomly generated with in the function
+
+    Returns:
+        (torch.autograd.Variable) the marginal likelihood of the batch; shape (1, )
+    '''
     # ### Validation
 
     # Check that params are of right type
@@ -93,6 +126,7 @@ def mle_estimate_batch_likelihood(batch, mle_params, sub_B, test_noise=None):
 
 
 def mle_forward_step(x, mle_params, B, sub_B, learning_rate):
+    '''Run an update step for naive MLE method'''
     # Create minibatch
     batch = utils.select_minibatch(x, B)
 
@@ -115,6 +149,18 @@ def mle_forward_step(x, mle_params, B, sub_B, learning_rate):
 
 
 def mle_forward_step_w_optim(x, mle_params, B, sub_B, optimizer):
+    '''Run an update step for naive MLE method
+
+    Args:
+        x: (numpy array like) the inputs; shape (N, M)
+        mle_params: (MLE_PARAMS torch.autograd.Variable tuple) the variables needed to compute
+        B: (int) the batch size
+        sub_B: (int) the sub-batch size (used to estimate E_z[log lik(x)])
+        optimizer: the pytorch optimization routine to use
+
+    Returns:
+        the parameters, now updated & the negative marginal log likelihood (as comp'd on batch)
+    '''
     # Create minibatch
     batch = utils.select_minibatch(x, B)
 
@@ -136,7 +182,17 @@ def mle_forward_step_w_optim(x, mle_params, B, sub_B, optimizer):
     return mle_params, neg_marginal_log_lik
 
 
-# Maximum likelihood - marginalizing out z
+#
+# Method 2:
+#
+# In this less-naive approach, we analytically marginalize out z instead of
+# estimating the marginalized density, e.g.,
+#
+#    log P(x | beta, sigma^2) = sum_i log P(x_i | beta, sigma)
+#                             = sum_i log N(x_i; 0, K)
+#
+# where K = t(B) * B + sigma^2 * I.
+#
 
 def compute_var(beta, sigma):
     '''Computes M = t(W) * W + sigma^2 * I, which is a commonly used quantity'''
@@ -183,7 +239,17 @@ def mle_forward_step_w_optim_v2(x, mle_params, B, optimizer):
     return mle_params, neg_marginal_log_lik
 
 
-# Marginalize out beta and compute marginal likelihood
+#
+# Method 3:
+#
+# In an alternative approach, we marginalize out beta (using a N(0, alpha^2 * I)
+# prior on beta and instead try to optimize
+#
+#     log P(x | z, alpha, sigma) = sum_i log P(x_i | z, alpha, sigma)
+#                                = sum_i log N(x_i; 0, K)
+#
+# where K = alpha^2 * t(Z) * Z + sigma^2 * I.
+#
 
 MLE_PARAMS_2 = namedtuple('MLE_PARAMS_2', ['z', 'sigma', 'alpha'])
 
@@ -243,7 +309,20 @@ def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
     return mle_params, neg_marginal_log_lik
 
 
-# Expectation maximization
+# ### Expectation maximization methods
+
+#
+# EM *should* be a lot more efficient than maximum likelihood at learning latent variable models
+#
+# Note that with EM, we try to optimize P(x | beta, sigma), using the iterative process to help
+# with the marginalization of z. I imagine there is a way to reframe it as P(x | alpha, sigma, z)
+# but have not put in the work for that yet :P
+#
+# The two steps of EM run as follows:
+#    1) Compute first and second moments of P(z | x, beta, sigma) using last iteration's values
+#    2) Use ^^^ to write the full data likelihood and maximize with respect to beta & sigma
+#       (treating the moments computed in [1] as fixed)
+#
 
 EM_PARAMS = namedtuple('EM_PARAMS', ['beta', 'sigma'])
 
@@ -341,7 +420,21 @@ def em_forward_step(x, em_params, B, optimizer):
     return em_params, full_data_log_likelihood
 
 
-# Methods for variational bayes fitting
+# ### Variational bayes methods
+
+#
+# We use a simple variational approximation here in imitation of the VAE's methodology, e.g.,
+# we try to minimize the KL-divergence between the true posterior
+#
+#     P(z | x, beta, sigma)
+#
+# and the proposal distribution
+#
+#     q(z | x, beta_q, sigma_q) = N(x; beta_q, sigma_q^2 * I)
+#
+# This should be a biased estimator & ought disagree with the E-M estimate; more a proof
+# of concept than anything else.
+#
 
 VB_PARAMS = namedtuple('VB_PARAMS', ['beta', 'sigma', 'beta_q', 'sigma_q'])
 
