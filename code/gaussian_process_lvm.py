@@ -30,7 +30,7 @@ from code.utils import make_torch_variable
 def rbf_kernel_forward(x1, x2, log_lengthscale, eps=1e-5):
     '''Compute the distance matrix under rbf kernel; taken from github repo jrg365/gpytorch
 
-    e.g., K(x, x') = exp( - ||x - x'||^2 / (2 * sigma**2) )
+    e.g., K(x, x') = exp( - ||x - x'||^2 / (l + eps) )
 
     Args:
         x1: (torch variable) shape n x d
@@ -64,12 +64,12 @@ MLE_PARAMS = namedtuple('MLE_PARAMS', ['z', 'alpha', 'sigma', 'log_l'])
 
 
 def _make_cov(x1, x2, alpha, sigma, log_l):
-    '''Construct the RBF covariance matrix for observations drawn from a gaussian process
+    '''Construct the covariance matrix for observations drawn from a gaussian process
 
     In particular, we compute K(x1, x2) + sigma ** 2, e.g., the covariance between each point
     in x1 with each point in x2 given the parameters.
 
-    where k(x1, x2) = alpha * exp(-0.5 * l * (t(x1) * x2))
+    where k(x1, x2) = (alpha ** 2) * exp(-0.5 * l * (t(x1) * x2)) (e.g., assuming RBF kernel)
 
     Args:
         x1: (Variable) the first set of points; shape N1 x M
@@ -95,7 +95,30 @@ def _make_cov(x1, x2, alpha, sigma, log_l):
 
 
 def _mle_log_likelihood(x, z, alpha, sigma, log_l):
-    '''Note we use just one lengthscale across every dimension'''
+    '''Compute the log likelihood P(X | Z, alpha, sigma, log_l)
+
+    In particular, if X is (N x M1) and Z is (N x M2), we compute
+
+        P(X | Z, alpha, sigma, log_l) = prod_j P(X_{-, j} | Z, alpha, sigma, log_l)
+                                      = prod_j MVN(X_{-, j}; 0, K)
+
+    e.g., assuming independence between columns of X, and where K is a (N x N) matrix with entries
+
+        K[i, j] = (alpha ** 2) * rbf(z_i, z_j) + (sigma ** 2) * I
+
+    Note that we presume the same covariance structure across each dimension in this simple
+    model...
+
+    Args:
+        x: (Variable) N x M1 matrix of observations
+        z: (Variable) N x M2 matrix of latent variables
+        alpha: (Variable) the scale parameter of the gp kernel (maybe a redundant hyperparameter...)
+        sigma: (Variable) observation noise
+        log_l: (Variable) log lengthscale parameter of RBF
+
+    Returns:
+        (Variable) the marginal log likelihood of the observations X as a (1, ) vector
+    '''
     n, m1 = x.size()
     _, m2 = z.size()
 
@@ -103,8 +126,11 @@ def _mle_log_likelihood(x, z, alpha, sigma, log_l):
     cov = _make_cov(z, z, alpha, sigma, log_l)
 
     # Compute log lik
-    mu = make_torch_variable(np.zeros(n))
-    approx_marginal_log_likelihood = torch_mvn_density(x.t(), mu, cov)
+    mu = make_torch_variable(np.zeros(n), requires_grad=False)
+    approx_marginal_log_likelihood = torch_mvn_density(x.t(), mu, cov, log=True).sum()
+
+    print(mu)
+    print(cov)
 
     return approx_marginal_log_likelihood
 

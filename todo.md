@@ -38,3 +38,5 @@ x. Implement autoencoder
 6. Implement vae-ish -- but optimized using MLE
 
 7. Implement VAE
+
+Do i need alpha in the RBF? seems redundant?
