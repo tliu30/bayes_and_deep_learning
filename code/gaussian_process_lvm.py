@@ -129,9 +129,6 @@ def _mle_log_likelihood(x, z, alpha, sigma, log_l):
     mu = make_torch_variable(np.zeros(n), requires_grad=False)
     approx_marginal_log_likelihood = torch_mvn_density(x.t(), mu, cov, log=True).sum()
 
-    print(mu)
-    print(cov)
-
     return approx_marginal_log_likelihood
 
 
@@ -194,7 +191,8 @@ def _gp_conditional_mean_cov(cur_z, active_x, active_z, alpha, sigma, log_l,
         mean_component = torch.mm(active_x.t(), active_cov_inv)  # Dim (M1 x active_n)
 
     # Compute covariance of inactive point with active set, as well as with itself
-    active_inactive_cov = _make_cov(active_z, cur_z, alpha, sigma, log_l)  # Dim (active_n x 1)
+    no_noise = make_torch_variable([0.0], requires_grad=False)
+    active_inactive_cov = _make_cov(active_z, cur_z, alpha, no_noise, log_l)  # Dim (active_n x 1)
     inactive_var = _make_cov(cur_z, cur_z, alpha, sigma, log_l)  # Dim (1 x 1)
 
     # Compute E[cur_x] = t(active_x) * inv(active(cov)) * active_inactive_cov
