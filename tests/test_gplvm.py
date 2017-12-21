@@ -343,7 +343,8 @@ class TestGPLVM(unittest.TestCase):
 
         # Compute values relative to inactive set
         inactive_x = np.array([
-            [0.5, 0.5]
+            [0.5, 0.5],
+            [0.5, 0.5],
         ])
 
         inactive_sq_dist_matrix = np.array([
@@ -358,28 +359,27 @@ class TestGPLVM(unittest.TestCase):
         # Compute the true values
         expected_mu = np.dot(active_z.T, np.dot(inv_active_cov, cross_cov)).T
         expected_var = inactive_var - np.dot(cross_cov.T, np.dot(inv_active_cov, cross_cov))
-        expected_sigma = expected_var * np.identity(2)
 
         inactive_noise = np.array([
             [0.0],
             [1.0]
         ])
-        expected_reparam = inactive_noise * expected_sigma + expected_mu
+        expected_reparam = inactive_noise * expected_var + expected_mu
 
         # Compute the test values
         active_x_var = make_torch_variable(active_x, requires_grad=False)
         active_z_var = make_torch_variable(active_z, requires_grad=False)
-        alpha_q_var = make_torch_variable([alpha_q], requires_grad=False)
-        sigma_q_var = make_torch_variable([sigma_q], requires_grad=False)
-        log_l_q_var = make_torch_variable([log_l_q], requires_grad=False)
-        inactive_x_var = make_torch_variable(inactive_x, requires_grad=True)
-        inactive_noise_var = make_torch_variable(inactive_noise, requires_grad=True)
+        alpha_q_var = make_torch_variable([alpha_q], requires_grad=True)
+        sigma_q_var = make_torch_variable([sigma_q], requires_grad=True)
+        log_l_q_var = make_torch_variable([log_l_q], requires_grad=True)
+        inactive_x_var = make_torch_variable(inactive_x, requires_grad=False)
+        inactive_noise_var = make_torch_variable(inactive_noise, requires_grad=False)
         test_reparam = _reparametrize_noise(
             inactive_x_var, inactive_noise_var, active_x_var, active_z_var,
             alpha_q_var, sigma_q_var, log_l_q_var
         )
 
-        assert_array_almost_equal(expected_reparam, test_reparam, decimal=5)
+        assert_array_almost_equal(expected_reparam, test_reparam.data.numpy(), decimal=5)
 
         # Check gradient
         test_reparam.sum().backward()

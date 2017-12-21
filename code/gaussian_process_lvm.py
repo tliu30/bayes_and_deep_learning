@@ -360,9 +360,11 @@ def _reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, alpha_q
             active_cov=active_cov, active_cov_inv=active_cov_inv, mean_component=mean_component
         )
 
-        reparametrized_points.append(torch.add(inactive_mu, torch.mul(inactive_sigma, cur_noise)))
+        reparam = torch.add(inactive_mu, torch.mul(inactive_sigma, cur_noise))
 
-    return torch.cat(reparametrized_points, dim=1)  # The dimension might be wrong here
+        reparametrized_points.append(reparam)
+
+    return torch.cat(reparametrized_points, dim=0)  # The dimension might be wrong here
 
 
 def reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, vb_params):
