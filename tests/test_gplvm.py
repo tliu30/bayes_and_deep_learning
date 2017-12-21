@@ -167,7 +167,11 @@ class TestGPLVM(unittest.TestCase):
         sigma = 2.0
         log_l = np.log(2.0)
 
-        active_sq_dist_matrix = np.dot(active_z, active_z.T)
+        active_sq_dist_matrix = np.array([
+            [0.0, 1.0, 4.0],
+            [1.0, 0.0, 1.0],
+            [4.0, 1.0, 0.0],
+        ])
         active_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * active_sq_dist_matrix)
         active_cov = (alpha ** 2) * active_rbf_kernel + (sigma ** 2) * np.identity(3)
         inv_active_cov = np.linalg.pinv(active_cov)
@@ -177,22 +181,20 @@ class TestGPLVM(unittest.TestCase):
             [0.5]
         ])
 
-        inactive_sq_dist_matrix = np.dot(inactive_z, active_z.T)
+        inactive_sq_dist_matrix = np.array([
+            [0.5 ** 2],
+            [0.5 ** 2],
+            [1.5 ** 2],
+        ])
+        print(inactive_sq_dist_matrix)
         inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * inactive_sq_dist_matrix)
         cross_cov = (alpha ** 2) * inactive_rbf_kernel
         inactive_var = (alpha ** 2) + (sigma ** 2)
 
         # Compute the true values
-        print((active_x, inv_active_cov, cross_cov))
         expected_mu = np.dot(active_x.T, np.dot(inv_active_cov, cross_cov)).T
         expected_var = inactive_var - np.dot(cross_cov.T, np.dot(inv_active_cov, cross_cov))
         expected_sigma = expected_var * np.identity(2)
-
-        inactive_noise = np.array([
-            [0.0],
-            [1.0]
-        ])
-        expected_reparam = inactive_noise * expected_sigma + expected_mu
 
         # Compute the test values
         active_x_var = make_torch_variable(active_x, requires_grad=False)
@@ -201,19 +203,20 @@ class TestGPLVM(unittest.TestCase):
         sigma_var = make_torch_variable([sigma], requires_grad=False)
         log_l_var = make_torch_variable([log_l], requires_grad=False)
         inactive_z_var = make_torch_variable(inactive_z, requires_grad=True)
-        inactive_noise_var = make_torch_variable(inactive_noise, requires_grad=True)
-        test_reparam = _reparametrize_noise(
-            inactive_z_var, inactive_noise_var, active_x_var, active_z_var,
-            alpha_var, sigma_var, log_l_var
+        test_mu, test_sigma = _gp_conditional_mean_cov(
+            inactive_z_var, active_x_var, active_z_var, alpha_var, sigma_var, log_l_var
         )
 
-        assert_array_almost_equal(expected_reparam, test_reparam, decimal=5)
+        assert_array_almost_equal(expected_mu, test_mu.data.numpy(), decimal=5)
+        assert_array_almost_equal(expected_sigma, test_sigma.data.numpy(), decimal=5)
 
         # Check gradient
-        test_reparam.sum().backward()
-        self.assertIsNotNone(alpha_var.grad)
-        self.assertIsNotNone(sigma_var.grad)
-        self.assertIsNotNone(log_l_var.grad)
+        test_mu.sum().backward(retain_graph=True)
+        self.assertIsNotNone(inactive_z_var.grad)
+        inactive_z_var.grad = None
+
+        test_sigma.sum().backward(retain_graph=True)
+        self.assertIsNotNone(inactive_z_var.grad)
 
         # ### Next, check computation of likelihood
 
@@ -266,11 +269,19 @@ class TestGPLVM(unittest.TestCase):
         log_l_q = np.log(2.0)
 
         # Compute covariances
-        sq_dist_x = np.dot(x, x.T)
+        sq_dist_x = np.array([
+            [0.0, 2.0, 8.0],
+            [2.0, 0.0, 2.0],
+            [8.0, 2.0, 0.0],
+        ])
         rbf_x = np.exp(-1.0 / np.exp(log_l_q) * sq_dist_x)
         cov_z = (alpha_q ** 2) * rbf_x + (sigma_q ** 2) * np.identity(3)
 
-        sq_dist_z = np.dot(z, z.T)
+        sq_dist_z = np.array([
+            [0.0, 1.0, 4.0],
+            [1.0, 0.0, 1.0],
+            [4.0, 1.0, 0.0],
+        ])
         rbf_z = np.exp(-1.0 / np.exp(log_l) * sq_dist_z)
         cov_x = (alpha ** 2) * rbf_z + (sigma ** 2) * np.identity(3)
 
@@ -293,6 +304,8 @@ class TestGPLVM(unittest.TestCase):
         test_lower_bound = _vb_lower_bound(
             x_var, z_var, alpha_var, sigma_var, log_l_var, alpha_q_var, sigma_q_var, log_l_q_var
         )
+
+        assert_array_almost_equal(expected_lower_bound, test_lower_bound.data.numpy(), decimal=5)
 
         # ### Check gradients
         test_lower_bound.backward()
@@ -319,7 +332,11 @@ class TestGPLVM(unittest.TestCase):
         sigma_q = 2.0
         log_l_q = np.log(2.0)
 
-        active_sq_dist_matrix = np.dot(active_x, active_x.T)
+        active_sq_dist_matrix = np.array([
+            [0.0, 2.0, 8.0],
+            [2.0, 0.0, 2.0],
+            [8.0, 2.0, 0.0],
+        ])
         active_rbf_kernel = np.exp(-1.0 / np.exp(log_l_q) * active_sq_dist_matrix)
         active_cov = (alpha_q ** 2) * active_rbf_kernel + (sigma_q ** 2) * np.identity(3)
         inv_active_cov = np.linalg.pinv(active_cov)
@@ -329,7 +346,11 @@ class TestGPLVM(unittest.TestCase):
             [0.5, 0.5]
         ])
 
-        inactive_sq_dist_matrix = np.dot(inactive_x, active_x.T)
+        inactive_sq_dist_matrix = np.array([
+            [2 * (0.5 ** 2)],
+            [2 * (0.5 ** 2)],
+            [2 * (1.5 ** 2)],
+        ])
         inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l_q) * inactive_sq_dist_matrix)
         cross_cov = (alpha_q ** 2) * inactive_rbf_kernel
         inactive_var = (alpha_q ** 2) + (sigma_q ** 2)
