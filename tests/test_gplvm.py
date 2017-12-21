@@ -186,7 +186,6 @@ class TestGPLVM(unittest.TestCase):
             [0.5 ** 2],
             [1.5 ** 2],
         ])
-        print(inactive_sq_dist_matrix)
         inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * inactive_sq_dist_matrix)
         cross_cov = (alpha ** 2) * inactive_rbf_kernel
         inactive_var = (alpha ** 2) + (sigma ** 2)
