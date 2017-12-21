@@ -197,7 +197,7 @@ def _gp_conditional_mean_cov(cur_z, active_x, active_z, alpha, sigma, log_l,
 
     # Compute E[cur_x] = t(active_x) * inv(active(cov)) * active_inactive_cov
     # Dim (m1 x active_n) * (active_n x active_n) * (active_n x 1) --> (m1 x 1)
-    inactive_mu = torch.mm(mean_component, active_inactive_cov)
+    inactive_mu = torch.mm(mean_component, active_inactive_cov).t()
 
     # Compute Cov(cur_x) = (sigma ** 2) * I
     # Dim of sigma (1 x 1) - (1 x active_n) * (active_n x active_n) * (active_n x 1) --> (1 x 1)
@@ -321,7 +321,7 @@ def _vb_lower_bound(x, noise, alpha, sigma, log_l, alpha_q, sigma_q, log_l_q):
     log_prior = torch_mvn_density(noise, mu_prior, sigma_prior, log=True)
 
     # Compute lower bound
-    lower_bound = log_posterior - log_likelihood - log_prior
+    lower_bound = log_posterior.sum() - log_likelihood.sum() - log_prior.sum()
 
     return lower_bound.sum()
 
@@ -335,7 +335,7 @@ def vb_lower_bound(x, noise, vb_params):
     )
 
 
-def _reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, alpha_q, sigma_q, log_l_q):  # Don't i need to choose an active set?
+def _reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, alpha_q, sigma_q, log_l_q):
     '''Using an active set to give some definition to GP draw, reparam N(0, 1) noise given batch'''
     # Extract dimensions
     active_n, m1 = active_x.size()

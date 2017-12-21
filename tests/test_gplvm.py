@@ -10,8 +10,8 @@ from code.gaussian_process_lvm import (
     _mle_log_likelihood,
     MLE_PARAMS,
     mle_batch_log_likelihood,
-    _gp_conditional_mean_cov
-)
+    _gp_conditional_mean_cov,
+    _inactive_point_likelihood, _vb_lower_bound, _reparametrize_noise)
 from code.utils import make_torch_variable
 
 
@@ -149,8 +149,8 @@ class TestGPLVM(unittest.TestCase):
         self.assertIsNotNone(mle_params.sigma.grad)
         self.assertIsNotNone(mle_params.log_l.grad)
 
-    def test_inactive_conditional_on_active(self):
-        # ### Check values
+    def test_inactive_active_likelihood(self):
+        # ### Check computation of E[x | z, active set] and Var(x | z, active set)
 
         # Compute the active set's covariance
         active_x = np.array([
@@ -167,11 +167,7 @@ class TestGPLVM(unittest.TestCase):
         sigma = 2.0
         log_l = np.log(2.0)
 
-        active_sq_dist_matrix = np.array([
-            [0.0, 1.0, 4.0],
-            [1.0, 0.0, 1.0],
-            [4.0, 1.0, 0.0]
-        ])
+        active_sq_dist_matrix = np.dot(active_z, active_z.T)
         active_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * active_sq_dist_matrix)
         active_cov = (alpha ** 2) * active_rbf_kernel + (sigma ** 2) * np.identity(3)
         inv_active_cov = np.linalg.pinv(active_cov)
@@ -181,19 +177,22 @@ class TestGPLVM(unittest.TestCase):
             [0.5]
         ])
 
-        inactive_sq_dist_matrix = np.array([
-            [0.5 ** 2],
-            [0.5 ** 2],
-            [1.5 ** 2],
-        ])
+        inactive_sq_dist_matrix = np.dot(inactive_z, active_z.T)
         inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * inactive_sq_dist_matrix)
         cross_cov = (alpha ** 2) * inactive_rbf_kernel
         inactive_var = (alpha ** 2) + (sigma ** 2)
 
         # Compute the true values
-        expected_mu = np.dot(active_x.T, np.dot(inv_active_cov, cross_cov))
+        print((active_x, inv_active_cov, cross_cov))
+        expected_mu = np.dot(active_x.T, np.dot(inv_active_cov, cross_cov)).T
         expected_var = inactive_var - np.dot(cross_cov.T, np.dot(inv_active_cov, cross_cov))
         expected_sigma = expected_var * np.identity(2)
+
+        inactive_noise = np.array([
+            [0.0],
+            [1.0]
+        ])
+        expected_reparam = inactive_noise * expected_sigma + expected_mu
 
         # Compute the test values
         active_x_var = make_torch_variable(active_x, requires_grad=False)
@@ -202,17 +201,167 @@ class TestGPLVM(unittest.TestCase):
         sigma_var = make_torch_variable([sigma], requires_grad=False)
         log_l_var = make_torch_variable([log_l], requires_grad=False)
         inactive_z_var = make_torch_variable(inactive_z, requires_grad=True)
-        test_mu, test_sigma = _gp_conditional_mean_cov(
-            inactive_z_var, active_x_var, active_z_var, alpha_var, sigma_var, log_l_var
+        inactive_noise_var = make_torch_variable(inactive_noise, requires_grad=True)
+        test_reparam = _reparametrize_noise(
+            inactive_z_var, inactive_noise_var, active_x_var, active_z_var,
+            alpha_var, sigma_var, log_l_var
         )
 
-        assert_array_almost_equal(expected_mu, test_mu.data.numpy(), decimal=5)
-        assert_array_almost_equal(expected_sigma, test_sigma.data.numpy(), decimal=5)
+        assert_array_almost_equal(expected_reparam, test_reparam, decimal=5)
 
         # Check gradient
-        test_mu.sum().backward(retain_graph=True)
-        self.assertIsNotNone(inactive_z_var.grad)
-        inactive_z_var.grad = None
+        test_reparam.sum().backward()
+        self.assertIsNotNone(alpha_var.grad)
+        self.assertIsNotNone(sigma_var.grad)
+        self.assertIsNotNone(log_l_var.grad)
 
-        test_sigma.sum().backward(retain_graph=True)
+        # ### Next, check computation of likelihood
+
+        # Double the num points to check loop works
+        inactive_x = np.array([
+            [0.0, 0.0],
+            [0.0, 0.0]
+        ])
+        inactive_z = np.array([
+            [0.5],
+            [0.5]
+        ])
+
+        likelihood = ss.multivariate_normal(mean=expected_mu[0, :], cov=expected_sigma)
+        expected_log_lik = 2 * likelihood.logpdf(np.array([0.0, 0.0]))
+
+        inactive_x_var = make_torch_variable(inactive_x, requires_grad=False)
+        inactive_z_var = make_torch_variable(inactive_z, requires_grad=True)
+        test_log_lik = _inactive_point_likelihood(
+            active_x_var, active_z_var, inactive_x_var, inactive_z_var,
+            alpha_var, sigma_var, log_l_var
+        )
+
+        assert_array_almost_equal(expected_log_lik, test_log_lik.data.numpy(), decimal=5)
+
+        # Check grad
+        test_log_lik.sum().backward()
         self.assertIsNotNone(inactive_z_var.grad)
+
+    def test_vb_lower_bound(self):
+        '''Check computations'''
+        # Establish parameters
+        x = np.array([
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [2.0, 2.0],
+        ])
+        z = np.array([
+            [0.0],
+            [1.0],
+            [2.0],
+        ])
+
+        alpha = 2.0
+        sigma = 2.0
+        log_l = np.log(2.0)
+
+        alpha_q = 2.0
+        sigma_q = 2.0
+        log_l_q = np.log(2.0)
+
+        # Compute covariances
+        sq_dist_x = np.dot(x, x.T)
+        rbf_x = np.exp(-1.0 / np.exp(log_l_q) * sq_dist_x)
+        cov_z = (alpha_q ** 2) * rbf_x + (sigma_q ** 2) * np.identity(3)
+
+        sq_dist_z = np.dot(z, z.T)
+        rbf_z = np.exp(-1.0 / np.exp(log_l) * sq_dist_z)
+        cov_x = (alpha ** 2) * rbf_z + (sigma ** 2) * np.identity(3)
+
+        # Compute components of bound
+        log_posterior = ss.multivariate_normal.logpdf(z.T, mean=np.zeros(3), cov=cov_z).sum()
+        log_likelihood = ss.multivariate_normal.logpdf(x.T, mean=np.zeros(3), cov=cov_x).sum()
+        log_prior = ss.multivariate_normal.logpdf(z, mean=np.zeros(1), cov=np.identity(1)).sum()
+
+        expected_lower_bound = log_posterior - log_likelihood - log_prior
+
+        # Compute test value
+        x_var = make_torch_variable(x, requires_grad=False)
+        z_var = make_torch_variable(z, requires_grad=False)
+        alpha_var = make_torch_variable([alpha], requires_grad=True)
+        sigma_var = make_torch_variable([sigma], requires_grad=True)
+        log_l_var = make_torch_variable([log_l], requires_grad=True)
+        alpha_q_var = make_torch_variable([alpha_q], requires_grad=True)
+        sigma_q_var = make_torch_variable([sigma_q], requires_grad=True)
+        log_l_q_var = make_torch_variable([log_l_q], requires_grad=True)
+        test_lower_bound = _vb_lower_bound(
+            x_var, z_var, alpha_var, sigma_var, log_l_var, alpha_q_var, sigma_q_var, log_l_q_var
+        )
+
+        # ### Check gradients
+        test_lower_bound.backward()
+        self.assertIsNotNone(alpha_var.grad)
+        self.assertIsNotNone(sigma_var.grad)
+        self.assertIsNotNone(log_l_var.grad)
+        self.assertIsNotNone(alpha_q_var.grad)
+        self.assertIsNotNone(sigma_q_var.grad)
+        self.assertIsNotNone(log_l_q_var.grad)
+
+    def test_vb_sample_noise(self):
+        '''Check computations'''
+        active_x = np.array([
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [2.0, 2.0],
+        ])
+        active_z = np.array([
+            [0.0],
+            [1.0],
+            [2.0],
+        ])
+        alpha_q = 2.0
+        sigma_q = 2.0
+        log_l_q = np.log(2.0)
+
+        active_sq_dist_matrix = np.dot(active_x, active_x.T)
+        active_rbf_kernel = np.exp(-1.0 / np.exp(log_l_q) * active_sq_dist_matrix)
+        active_cov = (alpha_q ** 2) * active_rbf_kernel + (sigma_q ** 2) * np.identity(3)
+        inv_active_cov = np.linalg.pinv(active_cov)
+
+        # Compute values relative to inactive set
+        inactive_x = np.array([
+            [0.5, 0.5]
+        ])
+
+        inactive_sq_dist_matrix = np.dot(inactive_x, active_x.T)
+        inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l_q) * inactive_sq_dist_matrix)
+        cross_cov = (alpha_q ** 2) * inactive_rbf_kernel
+        inactive_var = (alpha_q ** 2) + (sigma_q ** 2)
+
+        # Compute the true values
+        expected_mu = np.dot(active_z.T, np.dot(inv_active_cov, cross_cov)).T
+        expected_var = inactive_var - np.dot(cross_cov.T, np.dot(inv_active_cov, cross_cov))
+        expected_sigma = expected_var * np.identity(2)
+
+        inactive_noise = np.array([
+            [0.0],
+            [1.0]
+        ])
+        expected_reparam = inactive_noise * expected_sigma + expected_mu
+
+        # Compute the test values
+        active_x_var = make_torch_variable(active_x, requires_grad=False)
+        active_z_var = make_torch_variable(active_z, requires_grad=False)
+        alpha_q_var = make_torch_variable([alpha_q], requires_grad=False)
+        sigma_q_var = make_torch_variable([sigma_q], requires_grad=False)
+        log_l_q_var = make_torch_variable([log_l_q], requires_grad=False)
+        inactive_x_var = make_torch_variable(inactive_x, requires_grad=True)
+        inactive_noise_var = make_torch_variable(inactive_noise, requires_grad=True)
+        test_reparam = _reparametrize_noise(
+            inactive_x_var, inactive_noise_var, active_x_var, active_z_var,
+            alpha_q_var, sigma_q_var, log_l_q_var
+        )
+
+        assert_array_almost_equal(expected_reparam, test_reparam, decimal=5)
+
+        # Check gradient
+        test_reparam.sum().backward()
+        self.assertIsNotNone(alpha_q_var.grad)
+        self.assertIsNotNone(sigma_q_var.grad)
+        self.assertIsNotNone(log_l_q_var.grad)
