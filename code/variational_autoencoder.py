@@ -64,52 +64,71 @@ class VAE(nn.Module):
         self.m = m
         self.k = k
 
-    def forward(self, x):
+    def forward(self, x, noise=None):
         n, _ = x.size()
 
-        noise = make_torch_variable(np.random.randn(n, self.k), requires_grad=False)
-        sample_z = reparametrize_noise(noise, self)
+        if noise is None:
+            noise = make_torch_variable(np.random.randn(n, self.k), requires_grad=False)
+
+        sample_z = reparametrize_noise(x, noise, self)
 
         return vae_lower_bound(x, sample_z, self)
 
 
-def reparametrize_noise(gaussian_noise, vae_model):
-    mu = vae_model.encoder_mu(gaussian_noise)
-    sigma = vae_model.encoder_sigma(gaussian_noise)
+def reparametrize_noise(x, gaussian_noise, vae_model):
+    mu = vae_model.encoder_mu(x)
+    sigma = vae_model.encoder_sigma(x)
 
-    reparametrized = torch.add(mu, torch.mul(sigma, gaussian_noise))
+    reparametrized = torch.add(mu, torch.mul(sigma ** 2, gaussian_noise))
 
     return reparametrized
+
+
+def _expand_batch_sigma(sigma, m):
+    B, _ = sigma.size()
+
+    sigma = sigma.unsqueeze(2)  # B x 1 x 1
+
+    a = make_torch_variable(np.ones((m, 1)), requires_grad=False).expand(B, m, 1)
+    b = make_torch_variable(np.ones((1, m)), requires_grad=False).expand(B, 1, m)
+    c = make_torch_variable(np.identity(m), requires_grad=False).expand(B, m, m)
+
+    # [(B x 3 x 1) x (B x 1 x 1)] x (B x 1 x 3) element-wise (B x 3 x 3) --> B x
+    cov = torch.bmm(torch.bmm(a, sigma ** 2), b) * c
+
+    return cov
 
 
 def vae_lower_bound(x, z, vae_model):
     '''Compute variational lower bound, as specified by variational autoencoder'''
     # Some initial parameter setting
-    _, m1 = x.size()
+    n, m1 = x.size()
     _, m2 = z.size()
 
-    m1_m1_identity = make_torch_variable(np.identity(m1, m1), requires_grad=False)
-    m2_m2_identity = make_torch_variable(np.identity(m2, m2), requires_grad=False)
-
     # Parameters of the likelihood of x given the model & z
-    x_mu = vae_model.decoder_mu(z)
-    x_sigma = torch.mul(vae_model.decoder_sigma(z) ** 2, m1_m1_identity)
+    x_mu = vae_model.decoder_mu(z)  # b x m1
+    x_sigma = _expand_batch_sigma(vae_model.decoder_sigma(z) ** 2, m1)  # b x m1 x m1
 
     # Parameters of the variational approximation of the posterior of z given model & x
-    z_mu = vae_model.encoder_mu(x)
-    z_sigma = torch.mul(vae_model.encoder_sigma(x) ** 2, m2_m2_identity)
+    z_mu = vae_model.encoder_mu(x)  # b x m2
+    z_sigma = _expand_batch_sigma(vae_model.encoder_sigma(x) ** 2, m2)  # b x m2 x m2
 
     # Parameters of the prior of z
-    prior_mu = torch_mvn_density(np.zeros(m2), requires_grad=False)
-    prior_sigma = m2_m2_identity
+    prior_mu = make_torch_variable(np.zeros(m2), requires_grad=False)  # dim: m2
+    prior_sigma = make_torch_variable(np.identity(m2), requires_grad=False)  # m2 x m2
+
+    x_big = x.unsqueeze(1)  # reshape to n x 1 x m1
+    z_big = z.unsqueeze(1)  # reshape to n x 1 x m2
 
     # Compute components
-    log_posterior = torch_mvn_density(z, z_mu, z_sigma, log=True)
-    log_likelihood = torch_mvn_density(x, x_mu, x_sigma, log=True)
-    log_prior = torch_mvn_density(z, prior_mu, prior_sigma, log=True)
+    lower_bound = make_torch_variable([0.0], requires_grad=False)
+    for i in range(n):
+        log_posterior = torch_mvn_density(z_big[i, :, :], z_mu[i, :], z_sigma[i, :, :], log=True)
+        log_likelihood = torch_mvn_density(x_big[i, :, :], x_mu[i, :], x_sigma[i, :, :], log=True)
+        log_prior = torch_mvn_density(z_big[i, :, :], prior_mu, prior_sigma, log=True)
 
-    lower_bound = log_posterior - log_likelihood - log_prior
+        lower_bound += log_posterior - log_likelihood - log_prior
 
-    return lower_bound.sum()
+    return lower_bound
 
 
