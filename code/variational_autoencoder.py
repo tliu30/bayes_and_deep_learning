@@ -29,6 +29,21 @@ class FullyConnectedNN(nn.Module):
 class VAE(nn.Module):
 
     def __init__(self, m, k, encoder_mu, encoder_sigma, decoder_mu, decoder_sigma):
+        '''Construct a variational autoencoder by providing encoder and decoder networks
+
+        Remember that "encoders" parametrize the variational approximation to the posterior
+            q(z | x) = MVN(encoder_mu(x), (encoder_sigma(x) ** 2) * I)
+        and the "decoders" parametrize the likelihood
+            p(x | z) = MVN(decoder_mu(z), (decoder_sigma(z) ** 2) * I)
+
+        Args:
+            m: (int) dimension of observations
+            k: (int) dimension of latent variables
+            encoder_mu: (nn.Module) n x m--> n x k; specifies posterior's location parameter
+            encoder_sigma: (nn.Module) n x m--> n x 1; specifies posterior's scale parameter
+            decoder_mu: (nn.Module) n x k --> n x m; specifies likelihood's location parameter
+            decoder_sigma: (nn.Module) n x k--> n x 1; specifies likelihood's scale parameter
+        '''
         super(VAE, self).__init__()
 
         # check shapes
@@ -65,6 +80,7 @@ class VAE(nn.Module):
         self.k = k
 
     def forward(self, x, noise=None):
+        '''Estimate variational lower bound of parameters given observations x'''
         n, _ = x.size()
 
         if noise is None:
@@ -76,31 +92,73 @@ class VAE(nn.Module):
 
 
 def reparametrize_noise(x, gaussian_noise, vae_model):
+    '''Transform gaussian noise into samples from VAE's variational approximation to the posterior
+
+    e.g., draw eps ~ N(0, 1) and compute encoder_mu(x) + encoder_sigma(x) * eps
+
+    Args:
+        x: (Variable) observations; with shape n x m1
+        gaussian_noise: (Variable) sampled noise; with shape n x m2
+        vae_model: (VAE) the vector autoregressive model; implemented like a pytorch module
+
+    Returns:
+        (Variable) reparametrized gaussian noise s.t. imitate samples from q(z | x)
+    '''
     mu = vae_model.encoder_mu(x)
     sigma = vae_model.encoder_sigma(x)
 
-    reparametrized = torch.add(mu, torch.mul(sigma ** 2, gaussian_noise))
+    reparametrized = torch.add(mu, torch.mul(sigma, gaussian_noise))
 
     return reparametrized
 
 
 def _expand_batch_sigma_to_cov(sigma, m):
+    '''Given a vector of scalar parameters sigma, expand into a batch of covariance matrices
+
+    Assumes isotropic covariance, e.g., covariance = (sigma ** 2) * identity(m)
+
+    Args:
+        sigma: (Variable) batches of the scale parameter sigma; shape n x 1
+        m: (int) the desired parameter
+
+    Returns:
+        (Variable) batches of the covariance matrices built from each sigma; shape n x m x m
+    '''
     B, _ = sigma.size()
 
-    sigma = sigma.unsqueeze(2)  # B x 1 x 1
+    sigma = sigma.unsqueeze(2)  # n x 1 x 1
 
     a = make_torch_variable(np.ones((m, 1)), requires_grad=False).expand(B, m, 1)
     b = make_torch_variable(np.ones((1, m)), requires_grad=False).expand(B, 1, m)
     c = make_torch_variable(np.identity(m), requires_grad=False).expand(B, m, m)
 
-    # [(B x 3 x 1) x (B x 1 x 1)] x (B x 1 x 3) element-wise (B x 3 x 3) --> B x
+    # [(n x m x 1) x (n x 1 x 1)] x (n x 1 x m) element-wise (n x m x m) --> n x m x m
     cov = torch.bmm(torch.bmm(a, sigma ** 2), b) * c
 
     return cov
 
 
 def vae_lower_bound(x, z, vae_model):
-    '''Compute variational lower bound, as specified by variational autoencoder'''
+    '''Compute variational lower bound, as specified by variational autoencoder
+
+    The VAE model specifies
+      * likelihood x | z ~ MVN(encoder_mu(z), (encoder_sigma(z) ** 2) * I)
+      * posterior z | x ~ MVN(decoder_mu(z), (decoder_sigma(z) ** 2) * I)
+      * prior z ~ MVN(0, I)
+    where the posterior is not the true posterior, but rather the variational approximation.
+
+    This comes out to
+      lower bound = log q(z | x) - log p(x, z)
+                  = log q(z | x) - log p(x | z) - log p(z)
+
+    Args:
+        x: (Variable) observations; shape n x m1
+        z: (Variable) latent variables; shape n x m2
+        vae_model: (VAE) the vector autoregressive model; implemented like a pytorch module
+
+    Returns:
+        (Variable) lower bound; dim (1, )
+    '''
     # Some initial parameter setting
     n, m1 = x.size()
     _, m2 = z.size()
@@ -130,5 +188,3 @@ def vae_lower_bound(x, z, vae_model):
         lower_bound += log_posterior - log_likelihood - log_prior
 
     return lower_bound
-
-

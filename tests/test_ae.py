@@ -207,7 +207,7 @@ class TestAutoencoder(unittest.TestCase):
 
         reparam_mu = np.dot(x, encoder_mu_weights)
         reparam_sigma = 2.0  # e.g., just the bias
-        expected_reparam = noise * (reparam_sigma ** 2) + reparam_mu
+        expected_reparam = noise * reparam_sigma + reparam_mu
 
         noise_var = make_torch_variable(noise, requires_grad=False)
 
@@ -244,8 +244,8 @@ class TestAutoencoder(unittest.TestCase):
         test_bound_01 = vae_lower_bound(x_var, z_var, vae)
         test_bound_02 = vae.forward(x_var, noise=noise_var)
 
-        assert_array_almost_equal(expected_bound, test_bound_01.data.numpy(), decimal=5)
-        assert_array_almost_equal(expected_bound, test_bound_02.data.numpy(), decimal=5)
+        assert_array_almost_equal(expected_bound, test_bound_01.data.numpy(), decimal=4)
+        assert_array_almost_equal(expected_bound, test_bound_02.data.numpy(), decimal=4)
 
         # Check gradients
         test_bound_02.backward()
