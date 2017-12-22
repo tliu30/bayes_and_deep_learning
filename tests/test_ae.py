@@ -8,7 +8,7 @@ import torch
 from code.autoencoder import Autoencoder
 from code.utils import make_torch_variable
 from code.variational_autoencoder import VAE, reparametrize_noise, vae_lower_bound, \
-    _expand_batch_sigma
+    _expand_batch_sigma_to_cov
 
 
 class LinearTransformer(object):
@@ -131,7 +131,7 @@ class TestAutoencoder(unittest.TestCase):
 
         # Compute test & compare
         sigma_var = make_torch_variable(sigma, requires_grad=True)
-        test_batch_sigma = _expand_batch_sigma(sigma_var, m)
+        test_batch_sigma = _expand_batch_sigma_to_cov(sigma_var, m)
 
         assert_array_almost_equal(expected_batch_sigma, test_batch_sigma.data.numpy(), decimal=5)
 

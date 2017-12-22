@@ -84,7 +84,7 @@ def reparametrize_noise(x, gaussian_noise, vae_model):
     return reparametrized
 
 
-def _expand_batch_sigma(sigma, m):
+def _expand_batch_sigma_to_cov(sigma, m):
     B, _ = sigma.size()
 
     sigma = sigma.unsqueeze(2)  # B x 1 x 1
@@ -107,11 +107,11 @@ def vae_lower_bound(x, z, vae_model):
 
     # Parameters of the likelihood of x given the model & z
     x_mu = vae_model.decoder_mu(z)  # b x m1
-    x_sigma = _expand_batch_sigma(vae_model.decoder_sigma(z) ** 2, m1)  # b x m1 x m1
+    x_sigma = _expand_batch_sigma_to_cov(vae_model.decoder_sigma(z), m1)  # b x m1 x m1
 
     # Parameters of the variational approximation of the posterior of z given model & x
     z_mu = vae_model.encoder_mu(x)  # b x m2
-    z_sigma = _expand_batch_sigma(vae_model.encoder_sigma(x) ** 2, m2)  # b x m2 x m2
+    z_sigma = _expand_batch_sigma_to_cov(vae_model.encoder_sigma(x), m2)  # b x m2 x m2
 
     # Parameters of the prior of z
     prior_mu = make_torch_variable(np.zeros(m2), requires_grad=False)  # dim: m2
