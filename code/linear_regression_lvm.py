@@ -212,7 +212,7 @@ def mle_estimate_batch_likelihood_v2(batch, mle_params):
     mu = utils.make_torch_variable(np.zeros(M), False)
     sigma = compute_var(mle_params.beta, mle_params.sigma)
 
-    approx_marginal_log_likelihood = mvn.torch_mvn_density(batch, mu, sigma, True)
+    approx_marginal_log_likelihood = mvn.torch_mvn_density(batch, mu, sigma, log=True)
 
     return approx_marginal_log_likelihood.sum()
 
