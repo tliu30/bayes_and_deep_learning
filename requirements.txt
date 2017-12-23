@@ -6,3 +6,5 @@ pandas
 pytorch
 matplotlib
 pytest
+scikit-learn
+funcy
