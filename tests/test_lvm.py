@@ -301,7 +301,7 @@ class TestLinearRegressionLVM(unittest.TestCase):
             a_4 = -1 * np.dot(truth_e_z[[i], :], np.dot(beta, batch[[i], :].T))
             a_5 = 0.5 * np.sum(np.diag(np.dot(beta, np.dot(beta.T, truth_e_z2[i, :, :]))))
 
-            truth_log_lik[i] = a_1 + a_2 + a_3 + a_4 + a_5
+            truth_log_lik[i] = -1 * (a_1 + a_2 + a_3 + a_4 + a_5)
 
         truth_log_lik = truth_log_lik.sum()
 
@@ -319,6 +319,7 @@ class TestLinearRegressionLVM(unittest.TestCase):
 
         # Compare computation
         assert_array_almost_equal(truth_log_lik, test_log_lik.data.numpy())
+        self.assertLess(test_log_lik.data.numpy()[0], 0)
 
         # Check for grads
         test_log_lik.backward()

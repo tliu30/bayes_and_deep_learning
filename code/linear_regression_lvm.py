@@ -327,6 +327,13 @@ def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
 EM_PARAMS = namedtuple('EM_PARAMS', ['beta', 'sigma'])
 
 
+def em_initialize_parameters(M, K):
+    '''Initialize the parameters before fitting'''
+    beta = utils.make_torch_variable(np.random.randn(K, M), True)
+    sigma = utils.make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    return EM_PARAMS(beta=beta, sigma=sigma)
+
+
 def em_compute_posterior(batch, em_params):
     '''Computes the first and second moments of P(z | x)'''
     B, M = batch.size()
@@ -364,7 +371,7 @@ def em_compute_full_data_log_likelihood(batch, em_params, post_e_y, post_e_y2):
     batch_ = batch.unsqueeze(2)  # B x M --> B x M x 1
     batch_t_ = batch.unsqueeze(1)  # B x M --> B x 1 x M
     beta_ = em_params.beta.unsqueeze(0).expand(B, K, M)  # K x M --> B x K x M
-    beta_t_ = em_params.beta.t().unsqueeze(0).expand(B, K, M)  # K x M --> M x K --> B x M x K
+    beta_t_ = em_params.beta.t().unsqueeze(0).expand(B, M, K)  # K x M --> M x K --> B x M x K
     post_e_y_t_ = post_e_y.unsqueeze(1)  # B x K --> B x 1 x K
 
     # shape 1
@@ -390,7 +397,7 @@ def em_compute_full_data_log_likelihood(batch, em_params, post_e_y, post_e_y2):
     a_5 = torch.mul(a_5_1, extract_diagonals(a_5_2).sum(dim=1))
     a_5 = a_5.unsqueeze(1).unsqueeze(2)
 
-    full_data_log_likelihood = (a_1 + a_2 + a_3 + a_4 + a_5).sum()
+    full_data_log_likelihood = -1 * (a_1 + a_2 + a_3 + a_4 + a_5).sum()
 
     return full_data_log_likelihood
 
@@ -403,10 +410,10 @@ def em_forward_step(x, em_params, B, optimizer):
     e_y, e_y2 = em_compute_posterior(batch, em_params)
 
     # Use posterior to construct full data log likelihood as function of em_params
-    full_data_log_likelihood = em_compute_full_data_log_likelihood(batch, em_params, e_y, e_y2)
+    neg_full_data_log_likelihood = -1 * em_compute_full_data_log_likelihood(batch, em_params, e_y, e_y2)
 
     # Do a backward step
-    torch.mul(-1 * full_data_log_likelihood).backward()
+    neg_full_data_log_likelihood.backward()
 
     # Update step
     optimizer.step()
@@ -417,7 +424,7 @@ def em_forward_step(x, em_params, B, optimizer):
     # Clear gradients
     optimizer.zero_grad()
 
-    return em_params, full_data_log_likelihood
+    return em_params, neg_full_data_log_likelihood
 
 
 # ### Variational bayes methods
