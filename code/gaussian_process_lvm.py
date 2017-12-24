@@ -299,6 +299,17 @@ VB_PARAMS = namedtuple(
 )
 
 
+def vb_initialize_parameters():
+    alpha = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    sigma = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    log_l = make_torch_variable(np.log(np.random.rand(1) * 10 + 1e-10), True)
+    alpha_q = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    sigma_q = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    log_l_q = make_torch_variable(np.log(np.random.rand(1) * 10 + 1e-10), True)
+    return VB_PARAMS(alpha=alpha, sigma=sigma, log_l=log_l,
+                     alpha_q=alpha_q, sigma_q=sigma_q, log_l_q=log_l_q)
+
+
 def _vb_lower_bound(x, noise, alpha, sigma, log_l, alpha_q, sigma_q, log_l_q):
     '''Compute variational lower bound'''
 
@@ -360,7 +371,7 @@ def _reparametrize_noise(inactive_x, inactive_noise, active_x, active_z, alpha_q
             active_cov=active_cov, active_cov_inv=active_cov_inv, mean_component=mean_component
         )
 
-        reparam = torch.add(inactive_mu, torch.mul(inactive_sigma, cur_noise))
+        reparam = torch.add(inactive_mu, torch.mm(cur_noise, inactive_sigma))
 
         reparametrized_points.append(reparam)
 
@@ -383,7 +394,7 @@ def resample_latent_space(batch_x, active_x, active_z, vb_params):
     # Do this to get the mean...alternatively, could sample to introduce noise
     noise = make_torch_variable(np.zeros((n_batch, m2)), requires_grad=False)
 
-    return reparametrize_noise(batch_x, noise, active_x, active_z, vb_params)
+    return reparametrize_noise(batch_x, noise, active_x, active_z, vb_params).data.numpy()
 
 
 def vb_forward_step(x, z, vb_params, n_active, n_batch, optimizer):
@@ -403,22 +414,22 @@ def vb_forward_step(x, z, vb_params, n_active, n_batch, optimizer):
     computing the variational lower bound, as it creates a more meaningful function...
     '''
     # Select an active set
-    n, m1 = x.size()
-    _, m2 = z.size()
+    n, m1 = x.shape
+    _, m2 = z.shape
 
-    active_ix = np.random.choice(x, size=n_active, replace=False)
+    active_ix = np.random.choice(range(x.shape[0]), size=n_active, replace=False)
 
-    active_x = x[active_ix, :]
-    active_z = z[active_ix, :]
+    active_x = make_torch_variable(x[active_ix, :], requires_grad=False)
+    active_z = make_torch_variable(z[active_ix, :], requires_grad=False)
 
     # Select a batch from inactive set
-    inactive_ix = np.array([x for x in range(n) if x not in active_ix])
+    inactive_ix = np.array([i for i in range(n) if i not in active_ix])
     batch_ix = np.random.choice(inactive_ix, size=n_batch, replace=True)
 
-    batch_x = x[batch_ix, :]
+    batch_x = make_torch_variable(x[batch_ix, :], requires_grad=False)
 
     # Sample noise for batch (sample as MVN(0, I))
-    noise = np.random.randn(n, m2)
+    noise = make_torch_variable(np.random.randn(n_batch, m2), requires_grad=False)
 
     # Reparametrize noise given an active set
     batch_z = reparametrize_noise(batch_x, noise, active_x, active_z, vb_params)
