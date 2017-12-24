@@ -254,7 +254,7 @@ def mle_forward_step_w_optim_v2(x, mle_params, B, optimizer):
 MLE_PARAMS_2 = namedtuple('MLE_PARAMS_2', ['z', 'sigma', 'alpha'])
 
 
-def mle_initialize_parameters(N, M, K):
+def mle_initialize_parameters_v3(N, M, K):
     '''Initialize the parameters before fitting'''
     z = utils.make_torch_variable(np.random.randn(N, K), True)
     sigma = utils.make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
@@ -281,14 +281,14 @@ def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
 
     # ### Compute log lik
     mu = utils.make_torch_variable(np.zeros(B), requires_grad=False)
-    approx_marginal_log_likelihood = mvn.torch_mvn_density(batch_x.t(), mu, var, log=True)
+    approx_marginal_log_likelihood = mvn.torch_mvn_density(batch_x.t(), mu, var, log=True).sum()
 
     return approx_marginal_log_likelihood
 
 
 def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
     # Create minibatch
-    N, _ = x.shape
+    N, _ = x.size()
     batch_ix = np.random.choice(range(N), B, replace=True)
 
     # Estimate marginal likelihood of batch
@@ -302,6 +302,7 @@ def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
 
     # Constrain sigma
     mle_params.sigma.data[0] = max(1e-10, mle_params.sigma.data[0])
+    mle_params.alpha.data[0] = max(1e-10, mle_params.alpha.data[0])
 
     # Clear gradients
     optimizer.zero_grad()
