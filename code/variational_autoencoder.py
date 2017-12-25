@@ -3,26 +3,24 @@ import torch
 from torch import nn
 
 from code.mvn import torch_mvn_density
-from code.utils import make_torch_variable
+from code.utils import make_torch_variable, select_minibatch
 
 
 class FullyConnectedNN(nn.Module):
 
-    def __init__(self, layer_dimensions, hidden_activation_func, output_activation_func):
+    def __init__(self, layer_dimensions):
         super(FullyConnectedNN, self).__init__()
         layer_pairs = zip(layer_dimensions[:-1], layer_dimensions[1:])
         self.layers = nn.ModuleList([nn.Linear(n_in, n_out) for n_in, n_out in layer_pairs])
-        self.hidden_activation_func = hidden_activation_func
-        self.output_activation_func = output_activation_func
 
         self.input_dim = layer_dimensions[0]
         self.output_dim = layer_dimensions[-1]
 
     def forward(self, x):
         input = x
-        for layer in self.layers[:-1]:
-            input = self.hidden_activation_func(layer(input))
-        out = self.output_activation_func(self.layers[-1](input))
+        for i in range(len(self.layers) - 1):
+            input = self.layers[i](input).clamp(min=0)
+        out = self.layers[-1](input)
         return out
 
 
@@ -188,3 +186,22 @@ def vae_lower_bound(x, z, vae_model):
         lower_bound += log_posterior - log_likelihood - log_prior
 
     return lower_bound
+
+
+def vae_forward_step_w_optim(x, model, B, optimizer):
+    # Clear gradients
+    optimizer.zero_grad()
+
+    # Create minibatch
+    batch = select_minibatch(x, B)
+
+    # Evaluate loss
+    lower_bound = model(batch)
+
+    # Backward step
+    lower_bound.backward()
+
+    # Update step
+    optimizer.step()
+
+    return model, lower_bound
