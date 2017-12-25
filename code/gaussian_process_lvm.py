@@ -63,6 +63,14 @@ def rbf_kernel_forward(x1, x2, log_lengthscale, eps=1e-5):
 MLE_PARAMS = namedtuple('MLE_PARAMS', ['z', 'alpha', 'sigma', 'log_l'])
 
 
+def mle_initialize_parameters(N, M1, M2):
+    z = make_torch_variable(np.random.randn(N, M2), True)
+    alpha = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    sigma = make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
+    log_l = make_torch_variable(np.log(np.random.rand(1) * 10 + 1e-10), True)
+    return MLE_PARAMS(z=z, alpha=alpha, sigma=sigma, log_l=log_l)
+
+
 def _make_cov(x1, x2, alpha, sigma, log_l):
     '''Construct the covariance matrix for observations drawn from a gaussian process
 
@@ -265,9 +273,9 @@ def mle_active_inactive_step_w_optim(x, mle_params, b, optimizer_kernel, optimiz
     4. Rinse and repeat
     '''
     # Create batch (they use informative vector machine [IVM] but i'm lazy)
-    n, _ = x.shape
+    n, _ = x.size()
     active_ix = np.random.choice(range(n), b, replace=False)  # w/o replacement!
-    inactive_ix = [x for x in range(n) if x not in active_ix]
+    inactive_ix = [i for i in range(n) if i not in active_ix]
 
     # Optimize kernel parameters given the active set
     # TODO: refactor mle_forward_step_w_optim to do this?
