@@ -7,8 +7,7 @@ import torch
 
 from code.autoencoder import Autoencoder
 from code.utils import make_torch_variable
-from code.variational_autoencoder import VAE, reparametrize_noise, vae_lower_bound, \
-    _expand_batch_sigma_to_cov, vae_lower_bound_alt
+from code.variational_autoencoder import VAE, reparametrize_noise, vae_lower_bound
 
 
 class LinearTransformer(object):
@@ -111,33 +110,6 @@ class TestAutoencoder(unittest.TestCase):
         loss.backward()
         for p in parameters:
             self.assertIsNotNone(p)
-
-    def test_expand_batch_sigma(self):
-        '''Test the sigma expander - and make sure preserves derivatives'''
-        # Establish parameters
-        m = 2
-
-        sigma = np.array([
-            [1.0],
-            [2.0],
-            [3.0],
-            [4.0],
-        ])
-
-        # Establish truth
-        expected_batch_sigma = np.concatenate([
-            (np.identity(m) * (i ** 2)).reshape(-1, m, m) for i in [1.0, 2.0, 3.0, 4.0]
-        ])
-
-        # Compute test & compare
-        sigma_var = make_torch_variable(sigma, requires_grad=True)
-        test_batch_sigma = _expand_batch_sigma_to_cov(sigma_var, m)
-
-        assert_array_almost_equal(expected_batch_sigma, test_batch_sigma.data.numpy(), decimal=5)
-
-        # Ensure gradients are preserved
-        test_batch_sigma.sum().backward()
-        self.assertIsNotNone(sigma_var.grad)
 
     def test_variational_autoencoder(self):
         '''Make sure calculations are as expected & that gradients preserved'''
@@ -243,11 +215,9 @@ class TestAutoencoder(unittest.TestCase):
 
         test_bound_01 = vae_lower_bound(x_var, z_var, vae)
         test_bound_02 = vae.forward(x_var, noise=noise_var)
-        test_bound_03 = vae_lower_bound_alt(x_var, z_var, vae)
 
         assert_array_almost_equal(expected_bound, test_bound_01.data.numpy(), decimal=4)
         assert_array_almost_equal(expected_bound, test_bound_02.data.numpy(), decimal=4)
-        assert_array_almost_equal(expected_bound, test_bound_03.data.numpy(), decimal=4)
 
         # Check gradients
         test_bound_02.backward()
