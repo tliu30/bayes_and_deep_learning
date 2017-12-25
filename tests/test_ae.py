@@ -8,7 +8,7 @@ import torch
 from code.autoencoder import Autoencoder
 from code.utils import make_torch_variable
 from code.variational_autoencoder import VAE, reparametrize_noise, vae_lower_bound, \
-    _expand_batch_sigma_to_cov
+    _expand_batch_sigma_to_cov, vae_lower_bound_alt
 
 
 class LinearTransformer(object):
@@ -243,9 +243,11 @@ class TestAutoencoder(unittest.TestCase):
 
         test_bound_01 = vae_lower_bound(x_var, z_var, vae)
         test_bound_02 = vae.forward(x_var, noise=noise_var)
+        test_bound_03 = vae_lower_bound_alt(x_var, z_var, vae)
 
         assert_array_almost_equal(expected_bound, test_bound_01.data.numpy(), decimal=4)
         assert_array_almost_equal(expected_bound, test_bound_02.data.numpy(), decimal=4)
+        assert_array_almost_equal(expected_bound, test_bound_03.data.numpy(), decimal=4)
 
         # Check gradients
         test_bound_02.backward()

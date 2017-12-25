@@ -7,6 +7,7 @@ import torch
 from torch.autograd import Variable
 
 from code import mvn
+from code.utils import make_torch_variable
 
 
 class TestMVN(unittest.TestCase):
@@ -95,4 +96,58 @@ class TestMVN(unittest.TestCase):
         log_test_0 = log_test_0.sum()
         log_test_0.backward()
         self.assertIsNotNone(mu_0_var.grad)
+        self.assertIsNotNone(sigma_var.grad)
+
+    def test_batch_mvn_computation(self):
+        # Make sure diagonal util works as expected
+        M = 5
+        diags = np.array([1.0, 2.0, 3.0])
+        expected_matrices = np.concatenate(
+            [d * np.identity(M).reshape(1, M, M) for d in diags],
+            axis=0
+        )
+
+        diags_var = Variable(torch.Tensor(diags), requires_grad=True)
+        test_matrices = mvn._make_batch_matrices_w_diagonal(diags_var, M)
+
+        assert_array_almost_equal(expected_matrices, test_matrices.data.numpy())
+
+        # Make sure likelihood computation is correct
+        B = 2
+        M = 3
+
+        x = np.array([  # shape (B, M)
+            [0, 0, 0],
+            [1, 1, 1]
+        ]).astype(float)
+
+        mu = np.array([  # shape (B, M)
+            [0, 0, 0],
+            [1, 1, 1]
+        ]).astype(float)
+
+        sigma = np.array([2, 3]).astype(float)  # shape (B, )
+
+        cov = np.concatenate([  # shape(B, M, M)
+            np.identity(M).reshape(1, M, M) * x for x in sigma
+        ]) ** 2
+
+        # Expected
+        expected = np.array([  # shape (B, 1)
+            ss.multivariate_normal.logpdf(x[i, :], mu[i, :], cov[i, :, :])
+            for i in range(B)
+        ])
+
+        # Test
+        x_var = make_torch_variable(x, requires_grad=True)
+        mu_var = make_torch_variable(mu, requires_grad=True)
+        sigma_var = make_torch_variable(sigma, requires_grad=True)
+        test = mvn.torch_diagonal_mvn_density_batch(x_var, mu_var, sigma_var, log=True)
+
+        assert_array_almost_equal(expected, test.data.numpy())
+
+        # Check gradients
+        test.sum().backward()
+        self.assertIsNotNone(x_var.grad)
+        self.assertIsNotNone(mu_var.grad)
         self.assertIsNotNone(sigma_var.grad)
