@@ -72,7 +72,7 @@ def torch_mvn_density(x, mu, sigma, log=False):
     check_autograd_variable_size(sigma, [(M, M)])
 
     # Precompute functions of sigma
-    mod_det_sigma = torch_determinant(2 * np.pi * sigma)
+    mod_log_det_sigma = torch_log_determinant(2 * np.pi * sigma)
     inv_sigma = torch.inverse(sigma)
 
     # ### Compute quadratic form for exponentiated segment
@@ -89,11 +89,11 @@ def torch_mvn_density(x, mu, sigma, log=False):
 
     # Compute total density, computing log density if requested
     if log:
-        normalization_constant = -0.5 * torch.log(mod_det_sigma)
+        normalization_constant = -0.5 * mod_log_det_sigma
         exponent = -0.5 * quad_form
         density = normalization_constant + exponent
     else:
-        normalization_constant = 1.0 / torch.sqrt(mod_det_sigma)
+        normalization_constant = 1.0 / torch.sqrt(torch.exp(mod_log_det_sigma))
         exponent = torch.exp(-0.5 * quad_form)
         density = normalization_constant * exponent
 
@@ -123,7 +123,7 @@ def torch_diagonal_mvn_density_batch(x, mu, sigma, log=False):
     check_autograd_variable_size(sigma, [(B, )])
 
     # Precompute functions of sigma
-    mod_det_sigma = (2 * np.pi * sigma ** 2) ** M  # (B, )
+    mod_log_det_sigma = M * torch.log(2 * np.pi * sigma ** 2)  # (B, )
     inv_sigma = (sigma ** -2)  # (B, 1)
 
     # ### Compute quadratic form for exponentiated segment
@@ -139,11 +139,11 @@ def torch_diagonal_mvn_density_batch(x, mu, sigma, log=False):
 
     # Compute total density, computing log density if requested
     if log:
-        normalization_constant = -0.5 * torch.log(mod_det_sigma)
+        normalization_constant = -0.5 * mod_log_det_sigma
         exponent = -0.5 * quad_form
         density = normalization_constant + exponent
     else:
-        normalization_constant = 1.0 / torch.sqrt(mod_det_sigma)
+        normalization_constant = 1.0 / torch.sqrt(torch.exp(mod_log_det_sigma))
         exponent = torch.exp(-0.5 * quad_form)
         density = normalization_constant * exponent
 
