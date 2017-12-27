@@ -289,7 +289,7 @@ def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
 def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
     # Create minibatch
     N, _ = x.size()
-    batch_ix = np.random.choice(range(N), B, replace=True)
+    batch_ix = np.random.choice(range(N), B, replace=False)
 
     # Estimate marginal likelihood of batch
     neg_marginal_log_lik = -1 * mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params)
