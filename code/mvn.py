@@ -47,6 +47,11 @@ def torch_determinant(square_matrix):
     return Cholesky.apply(square_matrix).diag().prod() ** 2
 
 
+def torch_log_determinant(square_matrix):
+    '''Compute the determinant of the matrix in a autodiff-friendly way'''
+    return 2 * torch.log(Cholesky.apply(square_matrix).diag()).sum()
+
+
 # ### Multivariate normal density computation
 
 def torch_mvn_density(x, mu, sigma, log=False):

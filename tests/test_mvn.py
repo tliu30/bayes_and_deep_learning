@@ -29,8 +29,17 @@ class TestMVN(unittest.TestCase):
         assert_array_almost_equal(truth, test.data.numpy())
 
         # Check availability of gradient
-        test = mvn.torch_determinant(sigma_var)
         test.backward()
+        self.assertIsNotNone(sigma_var.grad)
+
+        # Check computation of log determinant
+        sigma_var = Variable(torch.Tensor(sigma).type(torch.FloatTensor), requires_grad=True)
+        test_log = torch.exp(mvn.torch_log_determinant(sigma_var))
+
+        assert_array_almost_equal(truth, test_log.data.numpy())
+
+        # Check availability of gradient
+        test_log.backward()
         self.assertIsNotNone(sigma_var.grad)
 
     def test_mvn_density(self):
