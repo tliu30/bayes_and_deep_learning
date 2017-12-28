@@ -104,7 +104,7 @@ def reparametrize_noise(x, gaussian_noise, vae_model):
         (Variable) reparametrized gaussian noise s.t. imitate samples from q(z | x)
     '''
     mu = vae_model.encoder_mu(x)
-    sigma = vae_model.encoder_sigma(x)
+    sigma = torch.exp(torch.mul(vae_model.encoder_sigma(x), 0.5))
 
     reparametrized = torch.add(mu, torch.mul(sigma, gaussian_noise))
 
@@ -185,16 +185,17 @@ def vae_lower_bound_less_sampling(x, z, vae_model):
 
     # Parameters of the likelihood of x given the model & z
     x_mu = vae_model.decoder_mu(z)  # (b, m1)
-    x_sigma = vae_model.decoder_sigma(z).squeeze(1)  # (b, )
+    # x_logvar = vae_model.decoder_sigma(z).squeeze(1)  # (b, )
+    x_sigma = make_torch_variable(torch.ones(n), requires_grad=False)
 
     # Parameters of the variational approximation of the posterior of z given model & x
     z_mu = vae_model.encoder_mu(x)  # (b, m2)
-    z_sigma = vae_model.encoder_sigma(x).squeeze(1)  # (b, )
+    z_logvar = vae_model.encoder_sigma(x).squeeze(1)  # (b, )
 
     # Compute components (e.g., expected log ___ under posterior approximation)
-    log_posterior = 0.5 * m2 * (1 + torch.log(z_sigma ** 2)) + 0.5 * m2 * np.log(2 * np.pi)
+    log_posterior = 0.5 * m2 * (1 + z_logvar) + 0.5 * m2 * np.log(2 * np.pi)
     log_likelihood = torch_diagonal_mvn_density_batch(x, x_mu, x_sigma, log=True)
-    log_prior = 0.5 * ((z_mu ** 2).sum() + (z_sigma ** 2)) + 0.5 * m2 * np.log(2 * np.pi)
+    log_prior = 0.5 * ((z_mu ** 2).sum(dim=1) + torch.exp(z_logvar)) + 0.5 * m2 * np.log(2 * np.pi)
 
     lower_bound = -1 * (log_posterior - log_likelihood - log_prior).sum()
 
