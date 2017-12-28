@@ -162,7 +162,7 @@ def vae_forward_step_w_optim(x, model, B, optimizer):
     optimizer.zero_grad()
 
     # Create minibatch
-    batch = select_minibatch(x, B)
+    batch = select_minibatch(x, B, replace=False)
 
     # Evaluate loss
     lower_bound = model(batch)

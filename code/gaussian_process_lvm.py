@@ -223,12 +223,13 @@ def _inactive_point_likelihood(active_x, active_z, inactive_x, inactive_z, alpha
     inactive_n, _ = inactive_x.size()
 
     # Construct covariance of active set & functions thereof that get reused
-    active_cov = _make_cov(active_z, active_z, alpha, sigma, log_l)
-    active_cov_inv = torch.inverse(active_cov)
-    mean_component = torch.mm(active_x.t(), active_cov_inv)  # Dim (M1 x active_n)
+    active_cov = _make_cov(active_z, active_z, alpha, sigma, log_l)  # (active_n, active_n)
+    active_cov_inv = torch.inverse(active_cov)  # (active_n, active_n)
+    mean_component = torch.mm(active_x.t(), active_cov_inv)  # Dim (M1, active_n)
 
     # Compute likelihood of inactive set conditional on active set
     # (we iterate since (1) all computations are independent and (2) for clarity)
+
     inactive_log_lik = make_torch_variable([0], requires_grad=False)
     for i in range(inactive_n):
 
