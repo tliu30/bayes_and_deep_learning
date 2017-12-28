@@ -86,7 +86,8 @@ class VAE(nn.Module):
 
         sample_z = reparametrize_noise(x, noise, self)
 
-        return vae_lower_bound(x, sample_z, self)
+        # return vae_lower_bound(x, sample_z, self)
+        return vae_lower_bound_less_sampling(x, sample_z, self)
 
 
 def reparametrize_noise(x, gaussian_noise, vae_model):
@@ -153,6 +154,49 @@ def vae_lower_bound(x, z, vae_model):
     log_prior = torch_mvn_density(z, prior_mu, prior_sigma, log=True)
 
     lower_bound = (log_posterior - log_likelihood - log_prior).sum()
+
+    return lower_bound
+
+
+def vae_lower_bound_less_sampling(x, z, vae_model):
+    '''Compute variational lower bound, as specified by variational autoencoder
+
+    The VAE model specifies
+      * likelihood x | z ~ MVN(encoder_mu(z), (encoder_sigma(z) ** 2) * I)
+      * posterior z | x ~ MVN(decoder_mu(z), (decoder_sigma(z) ** 2) * I)
+      * prior z ~ MVN(0, I)
+    where the posterior is not the true posterior, but rather the variational approximation.
+
+    This comes out to
+      lower bound = log q(z | x) - log p(x, z)
+                  = log q(z | x) - log p(x | z) - log p(z)
+
+    Args:
+        x: (Variable) observations; shape n x m1
+        z: (Variable) latent variables; shape n x m2
+        vae_model: (VAE) the vector autoregressive model; implemented like a pytorch module
+
+    Returns:
+        (Variable) lower bound; dim (1, )
+    '''
+    # Some initial parameter setting
+    n, m1 = x.size()
+    _, m2 = z.size()
+
+    # Parameters of the likelihood of x given the model & z
+    x_mu = vae_model.decoder_mu(z)  # (b, m1)
+    x_sigma = vae_model.decoder_sigma(z).squeeze(1)  # (b, )
+
+    # Parameters of the variational approximation of the posterior of z given model & x
+    z_mu = vae_model.encoder_mu(x)  # (b, m2)
+    z_sigma = vae_model.encoder_sigma(x).squeeze(1)  # (b, )
+
+    # Compute components (e.g., expected log ___ under posterior approximation)
+    log_posterior = 0.5 * m2 * (1 + torch.log(z_sigma ** 2)) + 0.5 * m2 * np.log(2 * np.pi)
+    log_likelihood = torch_diagonal_mvn_density_batch(x, x_mu, x_sigma, log=True)
+    log_prior = 0.5 * ((z_mu ** 2).sum() + (z_sigma ** 2)) + 0.5 * m2 * np.log(2 * np.pi)
+
+    lower_bound = -1 * (log_posterior - log_likelihood - log_prior).sum()
 
     return lower_bound
 
