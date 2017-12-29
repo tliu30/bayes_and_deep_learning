@@ -38,11 +38,11 @@ class VAE(nn.Module):
         self.m2 = m2
 
     def encode(self, x):
-        h = nn.ReLU(self.encoder_hidden(x))
+        h = nn.ReLU()(self.encoder_hidden(x))
         return self.encoder_mu_out(h), self.encoder_logvar_out(h)
 
     def decode(self, z):
-        h = nn.ReLU(self.decoder_hidden(z))
+        h = nn.ReLU()(self.decoder_hidden(z))
         return self.decoder_mu_out(h), self.decoder_logvar_out(h)
 
     def forward(self, x, noise=None):
@@ -50,7 +50,7 @@ class VAE(nn.Module):
         n, _ = x.size()
 
         if noise is None:
-            noise = make_torch_variable(np.random.randn(n, self.k), requires_grad=False)
+            noise = make_torch_variable(np.random.randn(n, self.m2), requires_grad=False)
 
         sample_z = reparametrize_noise(x, noise, self)
 
@@ -61,6 +61,8 @@ class VAE(nn.Module):
 class VAETest(VAE):
 
     def __init__(self, m1, m2, encoder_mu, encoder_logvar, decoder_mu, decoder_logvar):
+        super(VAE, self).__init__()
+
         self.encoder_mu = encoder_mu
         self.encoder_logvar = encoder_logvar
         self.decoder_mu = decoder_mu
@@ -118,6 +120,7 @@ def vae_lower_bound(x, z, vae_model):
     Returns:
         (Variable) lower bound; dim (1, )
     '''
+    # TODO: Reimplement sampling based approach for comparison
     # ### Get parameters
 
     # Some initial parameter setting
@@ -158,8 +161,8 @@ def vae_forward_step_w_optim(x, model, B, optimizer):
     # Evaluate loss
     lower_bound = model(batch)
 
-    # Backward step
-    lower_bound.backward()
+    # Backward step (compute loss as neg lower bound since we want to maximize it)
+    (-1 * lower_bound).backward()
 
     # Update step
     optimizer.step()

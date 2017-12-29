@@ -42,7 +42,7 @@ class VAE(nn.Module):
 
     def decode(self, z):
         h3 = self.relu(self.fc3(z))
-        return self.sigmoid(self.fc4(h3))
+        return self.fc4(h3)  # if doing classification, this ought to be a sigmoid-like
 
     def forward(self, x):
         # Use encoder to compute mean and log variance of latent variables
