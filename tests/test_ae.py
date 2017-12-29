@@ -7,7 +7,7 @@ import torch
 
 from code.autoencoder import Autoencoder
 from code.utils import make_torch_variable
-from code.variational_autoencoder import VAE, reparametrize_noise, vae_lower_bound
+from code.variational_autoencoder import VAE, reparametrize_noise, vae_lower_bound, VAETest
 
 
 class LinearTransformer(object):
@@ -130,43 +130,43 @@ class TestAutoencoder(unittest.TestCase):
             [1.0, 1.0],
             [1.0, 1.0]
         ]) / 3.0
-        encoder_mu_bias = np.array([0.0])
-        encoder_sigma_weights = np.array([
-            [0.0],
-            [0.0],
-            [0.0]
+        encoder_mu_bias = np.array([0.0, 0.0])
+        encoder_logvar_weights = np.array([
+            [0.0, 0.0],
+            [0.0, 0.0],
+            [0.0, 0.0]
         ])
-        encoder_sigma_bias = np.array([2.0])
+        encoder_logvar_bias = np.log(np.array([4.0, 4.0]))
 
         decoder_mu_weights = np.array([
             [1.0, 1.0, 1.0],
             [1.0, 1.0, 1.0]
         ]) / 2.0
-        decoder_mu_bias = np.array([0.0])
-        decoder_sigma_weights = np.array([
-            [0.0],
-            [0.0]
+        decoder_mu_bias = np.array([0.0, 0.0, 0.0])
+        decoder_logvar_weights = np.array([
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
         ])
-        decoder_sigma_bias = np.array([2.0])
+        decoder_logvar_bias = np.log(np.array([4.0, 4.0, 4.0]))
 
         x_var = make_torch_variable(x, requires_grad=False)
 
         encoder_mu_weights_var = make_torch_variable(encoder_mu_weights, requires_grad=True)
         encoder_mu_bias_var = make_torch_variable(encoder_mu_bias, requires_grad=True)
-        encoder_sigma_weights_var = make_torch_variable(encoder_sigma_weights, requires_grad=True)
-        encoder_sigma_bias_var = make_torch_variable(encoder_sigma_bias, requires_grad=True)
+        encoder_logvar_weights_var = make_torch_variable(encoder_logvar_weights, requires_grad=True)
+        encoder_logvar_bias_var = make_torch_variable(encoder_logvar_bias, requires_grad=True)
 
         decoder_mu_weights_var = make_torch_variable(decoder_mu_weights, requires_grad=True)
         decoder_mu_bias_var = make_torch_variable(decoder_mu_bias, requires_grad=True)
-        decoder_sigma_weights_var = make_torch_variable(decoder_sigma_weights, requires_grad=True)
-        decoder_sigma_bias_var = make_torch_variable(decoder_sigma_bias, requires_grad=True)
+        decoder_logvar_weights_var = make_torch_variable(decoder_logvar_weights, requires_grad=True)
+        decoder_logvar_bias_var = make_torch_variable(decoder_logvar_bias, requires_grad=True)
 
         encoder_mu = LinearTransformer(encoder_mu_weights_var, encoder_mu_bias_var)
-        encoder_sigma = LinearTransformer(encoder_sigma_weights_var, encoder_sigma_bias_var)
+        encoder_logvar = LinearTransformer(encoder_logvar_weights_var, encoder_logvar_bias_var)
         decoder_mu = LinearTransformer(decoder_mu_weights_var, decoder_mu_bias_var)
-        decoder_sigma = LinearTransformer(decoder_sigma_weights_var, decoder_sigma_bias_var)
+        decoder_logvar = LinearTransformer(decoder_logvar_weights_var, decoder_logvar_bias_var)
 
-        vae = VAE(m1, m2, encoder_mu, encoder_sigma, decoder_mu, decoder_sigma)
+        vae = VAETest(m1, m2, encoder_mu, encoder_logvar, decoder_mu, decoder_logvar)
 
         # Test the reparametrize noise function
 
@@ -178,8 +178,8 @@ class TestAutoencoder(unittest.TestCase):
         ])
 
         reparam_mu = np.dot(x, encoder_mu_weights)
-        reparam_sigma = 2.0  # e.g., just the bias
-        expected_reparam = noise * reparam_sigma + reparam_mu
+        reparam_sigma = 2.0 * np.identity(m2)  # e.g., just the bias
+        expected_reparam = np.dot(noise, reparam_sigma) + reparam_mu
 
         noise_var = make_torch_variable(noise, requires_grad=False)
 
@@ -192,24 +192,20 @@ class TestAutoencoder(unittest.TestCase):
         z = expected_reparam
 
         x_mu = np.dot(z, decoder_mu_weights)
-        x_sigma_2 = decoder_sigma_bias ** 2
+        x_sigma_2 = 1.0
 
         z_mu = np.dot(x, encoder_mu_weights)
-        z_sigma_2 = encoder_sigma_bias ** 2
-
-        prior_mu = np.zeros(m2)
-        prior_sigma_2 = 1.0
+        z_sigma_2 = np.exp(encoder_logvar_bias)
 
         eye_m1 = np.identity(m1)
-        eye_m2 = np.identity(m2)
 
         expected_bound = 0.0
         for i in range(n):
-            log_posterior = ss.multivariate_normal.logpdf(z[i, :], z_mu[i, :], z_sigma_2 * eye_m2)
+            log_posterior = -0.5 * (np.log(z_sigma_2) + 1 + np.log(2 * np.pi)).sum()
             log_likelihood = ss.multivariate_normal.logpdf(x[i, :], x_mu[i, :], x_sigma_2 * eye_m1)
-            log_prior = ss.multivariate_normal.logpdf(z[i, :], prior_mu, prior_sigma_2 * eye_m2)
+            log_prior = -0.5 * ((z_mu[i, :]) ** 2 + z_sigma_2 + np.log(2 * np.pi)).sum()
 
-            expected_bound += log_posterior - log_likelihood - log_prior
+            expected_bound += -1 * (log_posterior - log_likelihood - log_prior)
 
         z_var = make_torch_variable(z, requires_grad=False)
 
@@ -223,9 +219,9 @@ class TestAutoencoder(unittest.TestCase):
         test_bound_02.backward()
         self.assertIsNotNone(encoder_mu_weights_var.grad)
         self.assertIsNotNone(encoder_mu_bias_var.grad)
-        self.assertIsNotNone(encoder_sigma_weights_var.grad)
-        self.assertIsNotNone(encoder_sigma_bias_var.grad)
+        self.assertIsNotNone(encoder_logvar_weights_var.grad)
+        self.assertIsNotNone(encoder_logvar_bias_var.grad)
         self.assertIsNotNone(decoder_mu_weights_var.grad)
         self.assertIsNotNone(decoder_mu_bias_var.grad)
-        self.assertIsNotNone(decoder_sigma_weights_var.grad)
-        self.assertIsNotNone(decoder_sigma_bias_var.grad)
+        # self.assertIsNotNone(decoder_logvar_weights_var.grad)
+        # self.assertIsNotNone(decoder_logvar_bias_var.grad)
