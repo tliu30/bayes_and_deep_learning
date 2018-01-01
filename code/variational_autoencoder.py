@@ -8,7 +8,7 @@ from code.utils import make_torch_variable, select_minibatch
 
 class VAE(nn.Module):
 
-    def __init__(self, m1, m2, n_hidden):
+    def __init__(self, m1, m2, n_hidden, use_sampling=False):
         '''Construct a variational autoencoder by providing encoder and decoder networks
 
         Remember that "encoders" parametrize the variational approximation to the posterior
@@ -37,6 +37,8 @@ class VAE(nn.Module):
         self.m1 = m1
         self.m2 = m2
 
+        self.use_sampling = use_sampling
+
     def encode(self, x):
         h = nn.ReLU()(self.encoder_hidden(x))
         return self.encoder_mu_out(h), self.encoder_logvar_out(h)
@@ -54,13 +56,16 @@ class VAE(nn.Module):
 
         sample_z = reparametrize_noise(x, noise, self)
 
-        # return vae_lower_bound(x, sample_z, self)
-        return vae_lower_bound(x, sample_z, self)
+        if self.use_sampling:
+            return vae_lower_bound_w_sampling(x, sample_z, self)
+        else:
+            return vae_lower_bound(x, sample_z, self)
 
 
 class VAETest(VAE):
 
-    def __init__(self, m1, m2, encoder_mu, encoder_logvar, decoder_mu, decoder_logvar):
+    def __init__(self, m1, m2, encoder_mu, encoder_logvar, decoder_mu, decoder_logvar,
+                 use_sampling=False):
         super(VAE, self).__init__()
 
         self.encoder_mu = encoder_mu
@@ -69,6 +74,8 @@ class VAETest(VAE):
         self.decoder_logvar = decoder_logvar
         self.m1 = m1
         self.m2 = m2
+
+        self.use_sampling = use_sampling
 
     def encode(self, x):
         return self.encoder_mu(x), self.encoder_logvar(x)
@@ -115,7 +122,7 @@ def vae_lower_bound(x, z, vae_model):
     Args:
         x: (Variable) observations; shape n x m1
         z: (Variable) latent variables; shape n x m2
-        vae_model: (VAE) the vector autoregressive model; implemented like a pytorch module
+        vae_model: (VAE) the vector autoencoder model; implemented like a pytorch module
 
     Returns:
         (Variable) lower bound; dim (1, )
@@ -144,6 +151,49 @@ def vae_lower_bound(x, z, vae_model):
 
     # E[log prior]: analytically, is -0.5 * sum_j [log(2 pi) + mu_j ** 2 + sigma_j ** 2]
     log_prior = -0.5 * ((z_mu ** 2) + torch.exp(z_logvar) + np.log(2 * np.pi)).sum(dim=1)  # (B, )
+
+    # ### Put it all together
+    lower_bound = -1 * (log_posterior - log_likelihood - log_prior).sum()
+
+    return lower_bound
+
+
+def vae_lower_bound_w_sampling(x, z, vae_model):
+    '''Compute variational lower bound, as specified by variational autoencoder
+
+    This is less efficient then the main method `vae_lower_bound`, as it uses sampling rather than
+    exact computation.
+
+    Args:
+        x: (Variable) observations; shape n x m1
+        z: (Variable) latent variables; shape n x m2
+        vae_model: (VAE) the vector autoencoder model; implemented like a pytorch module
+
+    Returns:
+        (Variable) lower bound; dim (1, )
+    '''
+    # ### Get parameters
+
+    # Some initial parameter setting
+    n, m1 = x.size()
+    _, m2 = z.size()
+
+    # Parameters of the likelihood of x given the model & z
+    x_mu, _ = vae_model.decode(z)
+    x_sigma = make_torch_variable(torch.ones(n), requires_grad=False)
+
+    # Parameters of the variational approximation of the posterior of z given model & x
+    z_mu, z_logvar = vae_model.encode(x)
+    z_sigma = torch.exp(torch.mul(z_logvar, 0.5))
+
+    # Parameters of the (actual) prior distribution on z
+    prior_mu = make_torch_variable(np.zeros((n, m2)), requires_grad=False)
+    prior_sigma = make_torch_variable(np.ones(n), requires_grad=False)
+
+    # ### Compute components (e.g., expected log ___ under posterior approximation)
+    log_posterior = torch_diagonal_mvn_density_batch(z, z_mu, z_sigma, log=True)  # (B, )
+    log_likelihood = torch_diagonal_mvn_density_batch(x, x_mu, x_sigma, log=True)  # (B, )
+    log_prior = torch_diagonal_mvn_density_batch(z, prior_mu, prior_sigma, log=True)  # (B, )
 
     # ### Put it all together
     lower_bound = -1 * (log_posterior - log_likelihood - log_prior).sum()

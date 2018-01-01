@@ -166,7 +166,8 @@ class TestAutoencoder(unittest.TestCase):
         decoder_mu = LinearTransformer(decoder_mu_weights_var, decoder_mu_bias_var)
         decoder_logvar = LinearTransformer(decoder_logvar_weights_var, decoder_logvar_bias_var)
 
-        vae = VAETest(m1, m2, encoder_mu, encoder_logvar, decoder_mu, decoder_logvar)
+        vae = VAETest(m1, m2, encoder_mu, encoder_logvar, decoder_mu, decoder_logvar,
+                      use_sampling=False)
 
         # Test the reparametrize noise function
 

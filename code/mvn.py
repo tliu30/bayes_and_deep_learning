@@ -120,10 +120,13 @@ def torch_diagonal_mvn_density_batch(x, mu, sigma, log=False):
     # Input validation
     B, M = x.data.size()
     check_autograd_variable_size(mu, [(B, M)])
-    check_autograd_variable_size(sigma, [(B, )])
+    check_autograd_variable_size(sigma, [(B, ), (B, M)])
+
+    if sigma.size() == (B, ):
+        sigma = sigma.unsqueeze(1).expand(B, M)
 
     # Precompute functions of sigma
-    mod_log_det_sigma = M * torch.log(2 * np.pi * sigma ** 2)  # (B, )
+    mod_log_det_sigma = torch.log(2 * np.pi * sigma ** 2).sum(dim=1)  # (B, )
     inv_sigma = (sigma ** -2)  # (B, 1)
 
     # ### Compute quadratic form for exponentiated segment
