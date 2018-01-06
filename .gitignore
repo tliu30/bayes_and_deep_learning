@@ -2,3 +2,4 @@ venv
 .idea
 .cache
 code/__pycache__
+nbs
