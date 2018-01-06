@@ -446,7 +446,7 @@ def vb_forward_step(x, z, vb_params, n_active, n_batch, optimizer):
     # Compute variational lower bound & update parameters
     lower_bound = vb_lower_bound(batch_x, batch_z, vb_params)
 
-    lower_bound.backward()
+    (-1 * lower_bound).backward()
     optimizer.step()
 
     # Constrain sigma & alpha
@@ -460,3 +460,5 @@ def vb_forward_step(x, z, vb_params, n_active, n_batch, optimizer):
 
     # Update latent variables for inactive set given new parameters
     z[batch_ix, :] = resample_latent_space(batch_x, active_x, active_z, vb_params)
+
+    return vb_params, lower_bound

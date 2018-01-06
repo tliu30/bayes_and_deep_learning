@@ -254,9 +254,9 @@ def mle_forward_step_w_optim_v2(x, mle_params, B, optimizer):
 MLE_PARAMS_2 = namedtuple('MLE_PARAMS_2', ['z', 'sigma', 'alpha'])
 
 
-def mle_initialize_parameters_v3(N, M, K):
+def mle_initialize_parameters_v3(n, m1, m2):
     '''Initialize the parameters before fitting'''
-    z = utils.make_torch_variable(np.random.randn(N, K), True)
+    z = utils.make_torch_variable(np.random.randn(n, m2), True)
     sigma = utils.make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
     alpha = utils.make_torch_variable(np.random.rand(1) * 10 + 1e-10, True)
     return MLE_PARAMS_2(z=z, sigma=sigma, alpha=alpha)
@@ -264,32 +264,32 @@ def mle_initialize_parameters_v3(N, M, K):
 
 def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
     '''e.g., Y | x ~ N(0, alpha**2 t(x) x + sigma**2 I); treats each dimension independently'''
-    B = batch_ix.shape[0]
-    _, M = x.size()
-    _, K = mle_params_2.z.size()
+    b = batch_ix.shape[0]
+    _, m1 = x.size()
+    _, m2 = mle_params_2.z.size()
 
     batch_x = x[batch_ix, :]  # B x M
     batch_z = mle_params_2.z[batch_ix, :]  # B x K
 
     # ### Construct variance
     dot = torch.mm(batch_z, batch_z.t())  # (B x K) * (K x B) --> (B x B)
-    identity = utils.make_torch_variable(np.identity(B), False)
+    identity = utils.make_torch_variable(np.identity(b), False)
     var = torch.add(
         torch.mul(mle_params_2.alpha ** 2, dot),
         torch.mul(mle_params_2.sigma ** 2, identity)
     )
 
     # ### Compute log lik
-    mu = utils.make_torch_variable(np.zeros(B), requires_grad=False)
+    mu = utils.make_torch_variable(np.zeros(b), requires_grad=False)
     approx_marginal_log_likelihood = mvn.torch_mvn_density(batch_x.t(), mu, var, log=True).sum()
 
     return approx_marginal_log_likelihood
 
 
-def mle_forward_step_w_optim_v3(x, mle_params, B, optimizer):
+def mle_forward_step_w_optim_v3(x, mle_params, batch_size, optimizer):
     # Create minibatch
-    N, _ = x.size()
-    batch_ix = np.random.choice(range(N), B, replace=False)
+    n, _ = x.size()
+    batch_ix = np.random.choice(range(n), batch_size, replace=False)
 
     # Estimate marginal likelihood of batch
     neg_marginal_log_lik = -1 * mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params)

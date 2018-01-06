@@ -166,9 +166,9 @@ class TestLinearRegressionLVM(unittest.TestCase):
             [2, 2],
         ]).astype(float)
 
-        z = np.array([[0], [0], [0]]).astype(float)
-        sigma = 1.0
-        alpha = 1.0
+        z = np.array([[0], [1], [2]]).astype(float)
+        sigma = 2.0
+        alpha = 2.0
 
         var = (alpha ** 2) * np.dot(z, z.T) + (sigma ** 2) * np.identity(N)
 
