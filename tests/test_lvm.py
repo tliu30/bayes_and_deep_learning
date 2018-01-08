@@ -153,52 +153,45 @@ class TestLinearRegressionLVM(unittest.TestCase):
         self.assertIsNotNone(mle_params.beta.grad)
         self.assertIsNotNone(mle_params.sigma.grad)
 
-    def test_estimate_batch_likelihood_v3(self):
+    def test_estimate_batch_log_likelihood_lawrence(self):
         '''Test computation of marginal likelihood with latent var's marginalized out'''
         # Implied dimensions: B = 3, M = 2, K = 1, sub_B = 2
-        N = 3
-        M = 2
-        K = 1
+        n = 3
+        m1 = 2
+        m2 = 1
 
-        batch = np.array([
+        x = np.array([
             [0, 0],
             [1, 1],
             [2, 2],
         ]).astype(float)
-
         z = np.array([[0], [1], [2]]).astype(float)
         sigma = 2.0
         alpha = 2.0
 
-        var = (alpha ** 2) * np.dot(z, z.T) + (sigma ** 2) * np.identity(N)
+        var = (alpha ** 2) * np.dot(z, z.T) + (sigma ** 2) * np.identity(n)
 
-        # These are the computations used in Lawrence's paper
-        # Serve as nice secondary verification that we are computing things correctly
-        a_0 = N * M * np.log(2 * np.pi)
-        a_1 = M * np.log(np.linalg.det(var))
-        a_2 = np.diag(np.dot(np.linalg.pinv(var), np.dot(batch, batch.T))).sum()
+        a_0 = n * m1 * np.log(2 * np.pi)
+        a_1 = m1 * np.log(np.linalg.det(var))
+        a_2 = np.diag(np.dot(np.linalg.pinv(var), np.dot(x, x.T))).sum()
         truth_marginal_log_lik = -0.5 * (a_0 + a_1 + a_2)
 
-        mle_params_2 = linear_regression_lvm.MLE_PARAMS_2(
-            z=utils.make_torch_variable(z, True),
-            sigma=utils.make_torch_variable([sigma], True),
-            alpha=utils.make_torch_variable([alpha], True)
-        )
-        batch_var = utils.make_torch_variable(batch, False)
-        batch_ix = np.array([0, 1, 2])
+        x_var = utils.make_torch_variable(x, False)
+        z_var = utils.make_torch_variable(z, True)
+        sigma_var = utils.make_torch_variable([sigma], True)
+        alpha_var = utils.make_torch_variable([alpha], True)
 
-        test_marginal_log_lik = linear_regression_lvm.mle_estimate_batch_likelihood_v3(
-            batch_var, batch_ix, mle_params_2
+        test_marginal_log_lik = linear_regression_lvm._log_likelihood_lawrence(
+            x_var, z_var, sigma_var, alpha_var
         )
-        test_marginal_log_lik = test_marginal_log_lik.sum()
 
         assert_array_almost_equal(truth_marginal_log_lik, test_marginal_log_lik.data.numpy())
 
         # Check gradients
         test_marginal_log_lik.backward()
-        self.assertIsNotNone(mle_params_2.z.grad)
-        self.assertIsNotNone(mle_params_2.sigma.grad)
-        self.assertIsNotNone(mle_params_2.alpha.grad)
+        self.assertIsNotNone(z_var.grad)
+        self.assertIsNotNone(sigma_var.grad)
+        self.assertIsNotNone(alpha_var.grad)
 
     def test_em_compute_posterior_and_extract_diagonals(self):
         '''Ensure EM code passes snuff'''

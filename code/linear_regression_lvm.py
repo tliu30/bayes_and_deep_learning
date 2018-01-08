@@ -262,28 +262,63 @@ def mle_initialize_parameters_v3(n, m1, m2):
     return MLE_PARAMS_2(z=z, sigma=sigma, alpha=alpha)
 
 
-def mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params_2):
-    '''e.g., Y | x ~ N(0, alpha**2 t(x) x + sigma**2 I); treats each dimension independently'''
-    b = batch_ix.shape[0]
-    _, m1 = x.size()
-    _, m2 = mle_params_2.z.size()
+def build_marginal_covariance(z, sigma, alpha):
+    n, _ = z.size()
 
-    batch_x = x[batch_ix, :]  # B x M
-    batch_z = mle_params_2.z[batch_ix, :]  # B x K
+    inner_prod = torch.mm(z, z.t())
+    identity = utils.make_torch_variable(np.identity(n), False)
+    return (alpha ** 2) * inner_prod + (sigma ** 2) * identity
 
-    # ### Construct variance
-    dot = torch.mm(batch_z, batch_z.t())  # (B x K) * (K x B) --> (B x B)
-    identity = utils.make_torch_variable(np.identity(b), False)
-    var = torch.add(
-        torch.mul(mle_params_2.alpha ** 2, dot),
-        torch.mul(mle_params_2.sigma ** 2, identity)
-    )
 
-    # ### Compute log lik
-    mu = utils.make_torch_variable(np.zeros(b), requires_grad=False)
-    approx_marginal_log_likelihood = mvn.torch_mvn_density(batch_x.t(), mu, var, log=True).sum()
+def _log_likelihood_lawrence(x, z, sigma, alpha):
+    '''Compute log likelihood of P(X | Z, sigma, alpha) using formula in lawrence paper, e.g.,
 
-    return approx_marginal_log_likelihood
+    P(X | Z, sigma, alpha) = ((2 pi)^N |K|)^{-0.5 * M1} exp{-0.5 * trace(K^-1 X t(X))}
+
+    We compute K through the `build_marginal_covariance` function as
+
+    K = (alpha ** 2) * Z * t(Z) + (sigma ** 2) * I
+
+    e.g., of dimension (N, N) where alpha is the stdev of the weight prior and sigma is the
+    stdev of the observation noise
+
+    This is equivalent to computing the likelihood as
+        P(X | Z, sigma, alpha) = prod_{j \in [1, M1]} MVN(X_{-, j}; 0, K)
+    but more efficient, as it scales better with the dimension M1 (which is crucial when the
+    whole goal is dimension reduction :P).
+
+    Params:
+        x: the observations (N, M1)
+        z: the latent variables (N, M2)
+        sigma: the standard deviation of the observation noise (1, )
+        alpha: the standard deviation of the observation noise (1, )
+
+    Returns:
+        (1, ) vector holding the log likelihood
+    '''
+    n, m1 = x.size()
+    _, m2 = z.size()
+
+    k = build_marginal_covariance(z, sigma, alpha)
+    k_inv = torch.inverse(k)
+
+    x_inner_prod = torch.mm(x, x.t())
+
+    a1 = utils.make_torch_variable([-0.5 * n * m1 * np.log(2 * np.pi)], False)
+    a2 = -0.5 * m1 * mvn.torch_log_determinant(k)
+    a3 = -0.5 * torch.sum(torch.diag(torch.mm(k_inv, x_inner_prod)))
+
+    loglik = a1 + a2 + a3
+
+    return loglik
+
+
+def log_likelihood_lawrence(x, batch_ix, mle_params):
+    '''Wrapper around log likelihood function that manages batch indexing'''
+    batch_x = x[batch_ix, :]
+    batch_z = mle_params.z[batch_ix, :]
+
+    return _log_likelihood_lawrence(batch_x, batch_z, mle_params.sigma, mle_params.alpha)
 
 
 def mle_forward_step_w_optim_v3(x, mle_params, batch_size, optimizer):
@@ -292,7 +327,7 @@ def mle_forward_step_w_optim_v3(x, mle_params, batch_size, optimizer):
     batch_ix = np.random.choice(range(n), batch_size, replace=False)
 
     # Estimate marginal likelihood of batch
-    neg_marginal_log_lik = -1 * mle_estimate_batch_likelihood_v3(x, batch_ix, mle_params)
+    neg_marginal_log_lik = -1 * log_likelihood_lawrence(x, batch_ix, mle_params)
 
     # Do a backward step
     neg_marginal_log_lik.backward()
