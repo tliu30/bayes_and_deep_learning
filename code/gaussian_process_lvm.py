@@ -280,9 +280,9 @@ def mle_active_inactive_step_w_optim(x, mle_params, b, optimizer_kernel, optimiz
 
     # Optimize kernel parameters given the active set
     # TODO: refactor mle_forward_step_w_optim to do this?
-    neg_active_log_lik = -1 * mle_batch_log_likelihood(x, mle_params, active_ix)
+    active_log_lik = mle_batch_log_likelihood(x, mle_params, active_ix)
 
-    neg_active_log_lik.backward()
+    (-1 * active_log_lik).backward()
     optimizer_kernel.step()
 
     mle_params.log_l.data[0] = max(-10000, mle_params.log_l.data[0])
@@ -290,14 +290,19 @@ def mle_active_inactive_step_w_optim(x, mle_params, b, optimizer_kernel, optimiz
     mle_params.sigma.data[0] = max(1e-10, mle_params.sigma.data[0])
     mle_params.alpha.data[0] = max(1e-10, mle_params.alpha.data[0])
 
+    optimizer_kernel.zero_grad()
+
     # Optimize latent parameters of inactive set
     # TODO: do i need to do some splitting here so it doesn't try to optimize active latents?
-    neg_inactive_log_lik = -1 * inactive_point_likelihood(x, mle_params, active_ix, inactive_ix)
+    inactive_log_lik = inactive_point_likelihood(x, mle_params, active_ix, inactive_ix)
 
-    neg_inactive_log_lik.backward()
+    (-1 * inactive_log_lik).backward()
+    mle_params.z[active_ix, :] = 0  # Make sure we don't optimize active set
+
     optimizer_latent.step()
+    optimizer_latent.zero_grad()
 
-    return mle_params, neg_active_log_lik, neg_inactive_log_lik
+    return mle_params, active_log_lik, inactive_log_lik
 
 
 # Variational bayes version - where q(z) ~ N(g(x), sigma), g ~ GP
