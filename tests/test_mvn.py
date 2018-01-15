@@ -126,8 +126,8 @@ class TestMVN(unittest.TestCase):
         M = 3
 
         x = np.array([  # shape (B, M)
-            [0, 0, 0],
-            [1, 1, 1]
+            [0, 1, 2],
+            [2, 3, 4]
         ]).astype(float)
 
         mu = np.array([  # shape (B, M)
@@ -135,11 +135,11 @@ class TestMVN(unittest.TestCase):
             [1, 1, 1]
         ]).astype(float)
 
-        sigma = np.array([2, 3]).astype(float)  # shape (B, )
+        var = np.array([2, 3]).astype(float)  # shape (B, )
 
         cov = np.concatenate([  # shape(B, M, M)
-            np.identity(M).reshape(1, M, M) * x for x in sigma
-        ]) ** 2
+            np.identity(M).reshape(1, M, M) * x for x in var
+        ])
 
         # Expected
         expected = np.array([  # shape (B, 1)
@@ -150,8 +150,8 @@ class TestMVN(unittest.TestCase):
         # Test
         x_var = make_torch_variable(x, requires_grad=True)
         mu_var = make_torch_variable(mu, requires_grad=True)
-        sigma_var = make_torch_variable(sigma, requires_grad=True)
-        test = mvn.torch_diagonal_mvn_density_batch(x_var, mu_var, sigma_var, log=True)
+        var_var = make_torch_variable(var, requires_grad=True)
+        test = mvn.torch_diagonal_mvn_density_batch(x_var, mu_var, var_var, log=True)
 
         assert_array_almost_equal(expected, test.data.numpy())
 
@@ -159,4 +159,4 @@ class TestMVN(unittest.TestCase):
         test.sum().backward()
         self.assertIsNotNone(x_var.grad)
         self.assertIsNotNone(mu_var.grad)
-        self.assertIsNotNone(sigma_var.grad)
+        self.assertIsNotNone(var_var.grad)

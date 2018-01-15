@@ -21,7 +21,7 @@ from collections import namedtuple
 import numpy as np
 import torch
 
-from code.mvn import torch_mvn_density
+from code.mvn import torch_mvn_density, torch_diagonal_mvn_density_batch
 from code.utils import make_torch_variable
 
 
@@ -46,9 +46,9 @@ def rbf_kernel_forward(x1, x2, log_lengthscale, eps=1e-5):
 
     res = 2 * x1.matmul(x2.transpose(0, 1))
 
-    x1_squared = torch.bmm(x1.view(n, 1, d), x1.view(n, d, 1))
+    x1_squared = torch.bmm(x1.unsqueeze(1), x1.unsqueeze(2))
     x1_squared = x1_squared.view(n, 1).expand(n, m)
-    x2_squared = torch.bmm(x2.view(m, 1, d), x2.view(m, d, 1))
+    x2_squared = torch.bmm(x2.unsqueeze(1), x2.unsqueeze(2))
     x2_squared = x2_squared.view(1, m).expand(n, m)
     res.sub_(x1_squared).sub_(x2_squared)  # res = -(x - z)^2
 
@@ -93,7 +93,7 @@ def _make_cov(x1, x2, alpha, sigma, log_l):
     n2, _ = x2.size()
 
     inner_product = rbf_kernel_forward(x1, x2, log_l)
-    identity = make_torch_variable(np.identity(n1)[:n1, :n2], False)
+    identity = make_torch_variable(np.identity(max([n1, n2]))[:n1, :n2], False)
 
     a1 = torch.mul(alpha ** 2, inner_product)
     a2 = torch.mul(sigma ** 2, identity)
@@ -201,7 +201,7 @@ def _gp_conditional_mean_cov(cur_z, active_x, active_z, alpha, sigma, log_l,
     # Compute covariance of inactive point with active set, as well as with itself
     no_noise = make_torch_variable([0.0], requires_grad=False)
     active_inactive_cov = _make_cov(active_z, cur_z, alpha, no_noise, log_l)  # Dim (active_n x 1)
-    inactive_var = _make_cov(cur_z, cur_z, alpha, sigma, log_l)  # Dim (1 x 1)
+    inactive_var = _make_cov(cur_z, cur_z, alpha, no_noise, log_l)  # Dim (1 x 1)
 
     # Compute E[cur_x] = t(active_x) * inv(active(cov)) * active_inactive_cov
     # Dim (m1 x active_n) * (active_n x active_n) * (active_n x 1) --> (m1 x 1)
@@ -217,37 +217,45 @@ def _gp_conditional_mean_cov(cur_z, active_x, active_z, alpha, sigma, log_l,
 
 
 def _inactive_point_likelihood(active_x, active_z, inactive_x, inactive_z, alpha, sigma, log_l):
-    '''Compute the likelihood of the inactive set conditional on the active set'''
-    # Extract dimensions
-    active_n, m1 = active_x.size()
-    inactive_n, _ = inactive_x.size()
+    # TODO: Consider Rasmussen RW2 method for computing?
+    N_a, M1 = active_x.size()
+    N_i, _ = inactive_x.size()
 
-    # Construct covariance of active set & functions thereof that get reused
-    active_cov = _make_cov(active_z, active_z, alpha, sigma, log_l)  # (active_n, active_n)
-    active_cov_inv = torch.inverse(active_cov)  # (active_n, active_n)
-    mean_component = torch.mm(active_x.t(), active_cov_inv)  # Dim (M1, active_n)
+    # Set up active covariance (which gets re-used a lot & only needs computing once!)
+    active_cov = _make_cov(active_z, active_z, alpha, sigma, log_l)  # (N_a, N_a)
+    active_cov_inv = torch.inverse(active_cov)  # (N_a, N_a)
+    active_cov_inv_dot_x = torch.mm(active_cov_inv, active_x)  # (N_a, M1)
 
-    # Compute likelihood of inactive set conditional on active set
-    # (we iterate since (1) all computations are independent and (2) for clarity)
+    # Construct the inactive covariances
+    zero_var = make_torch_variable([0.0], False)
+    inactive_active_cov = _make_cov(inactive_z, active_z, alpha, zero_var, log_l)  # (N_i, N_a)
+    inactive_active_cov_var = inactive_active_cov.unsqueeze(1)  # (N_i, 1, N_a)
+    inactive_active_cov_var_t = inactive_active_cov.unsqueeze(2)  # (N_i, N_a, 1)
 
-    inactive_log_lik = make_torch_variable([0], requires_grad=False)
-    for i in range(inactive_n):
+    inactive_inactive_cov = _make_cov(inactive_z, inactive_z, alpha, zero_var, log_l)  # (N_i, N_i)
+    inactive_inactive_cov = torch.diag(inactive_inactive_cov).unsqueeze(1).unsqueeze(2)  # (N_i, 1, 1)
 
-        # Extract current pair
-        cur_x = inactive_x[[i], :]
-        cur_z = inactive_z[[i], :]
+    # Batch compute the means of each point (e.g., (N_i, 1, N_a) x (N_i, N_a, M1) --> (N_i, 1, M1))
+    batch_active_cov_inv_dot_x = active_cov_inv_dot_x.unsqueeze(0).expand(N_i, N_a, M1)  # (N_i, N_a, M1)
+    batch_mean = torch.bmm(inactive_active_cov_var, batch_active_cov_inv_dot_x)  # (N_i, 1, M1)
 
-        # Compute log likelihood of current instance
-        inactive_mu, inactive_sigma = _gp_conditional_mean_cov(
-            cur_z, active_x, active_z, alpha, sigma, log_l,
-            active_cov=active_cov, active_cov_inv=active_cov_inv, mean_component=mean_component
-        )
-        instance_log_lik = torch_mvn_density(cur_x, inactive_mu, inactive_sigma, log=True)
+    # Batch compute the variance of each point (assume dimensions independent, hence one-d)
+    # (N_i, 1, 1)  - (N_i, 1, N_a) x (N_i, N_a, N_a) x (N_i, N_a, 1) --> (N_i, 1, 1)
+    batch_active_cov_inv = active_cov_inv.unsqueeze(0).expand(N_i, N_a, N_a)
+    a0 = inactive_inactive_cov
+    a1 = torch.bmm(inactive_active_cov_var, torch.bmm(batch_active_cov_inv, inactive_active_cov_var_t))
 
-        # Add to overall log likelihood
-        inactive_log_lik = torch.add(inactive_log_lik, instance_log_lik)
+    batch_sigma_2 = a0 - a1  # (N_i, 1, 1)
 
-    return inactive_log_lik
+    # Do some reshaping & compute log likelihood
+    log_likelihood = torch_diagonal_mvn_density_batch(
+        inactive_x,  # (N_i, M1)
+        batch_mean.squeeze(1),  # (N_i, M1)
+        batch_sigma_2.squeeze(2).squeeze(1),  # (N_i, )
+        log=True
+    ).sum()
+
+    return log_likelihood
 
 
 def inactive_point_likelihood(x, mle_params, active_ix, inactive_ix):
@@ -297,7 +305,7 @@ def mle_active_inactive_step_w_optim(x, mle_params, b, optimizer_kernel, optimiz
     inactive_log_lik = inactive_point_likelihood(x, mle_params, active_ix, inactive_ix)
 
     (-1 * inactive_log_lik).backward()
-    mle_params.z[active_ix, :] = 0  # Make sure we don't optimize active set
+    # mle_params.z.grad.data[active_ix, :] = 0  # Make sure we don't optimize active set
 
     optimizer_latent.step()
     optimizer_latent.zero_grad()

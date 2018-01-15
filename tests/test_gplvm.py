@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from numpy.testing.utils import assert_array_almost_equal
 import scipy.stats as ss
+from scipy.spatial.distance import cdist
 
 from code.gaussian_process_lvm import (
     rbf_kernel_forward,
@@ -11,7 +12,7 @@ from code.gaussian_process_lvm import (
     MLE_PARAMS,
     mle_batch_log_likelihood,
     _gp_conditional_mean_cov,
-    _inactive_point_likelihood, _vb_lower_bound, _reparametrize_noise)
+    _inactive_point_likelihood, _vb_lower_bound, _reparametrize_noise, _inactive_point_likelihood)
 from code.utils import make_torch_variable
 
 
@@ -164,85 +165,57 @@ class TestGPLVM(unittest.TestCase):
             [2.0],
         ])
         alpha = 2.0
-        sigma = 2.0
+        var = 2.0
         log_l = np.log(2.0)
 
-        active_sq_dist_matrix = np.array([
-            [0.0, 1.0, 4.0],
-            [1.0, 0.0, 1.0],
-            [4.0, 1.0, 0.0],
-        ])
-        active_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * active_sq_dist_matrix)
-        active_cov = (alpha ** 2) * active_rbf_kernel + (sigma ** 2) * np.identity(3)
+        active_sq_dist_matrix = cdist(active_z, active_z, 'sqeuclidean')
+        active_rbf_kernel = np.exp(-1.0 * active_sq_dist_matrix / np.exp(log_l))
+        active_cov = (alpha ** 2) * active_rbf_kernel + var * np.identity(3)
         inv_active_cov = np.linalg.pinv(active_cov)
 
         # Compute values relative to inactive set
+        inactive_x = np.array([
+            [0.0, 0.0],
+            [0.0, 0.0]
+        ])
+
         inactive_z = np.array([
-            [0.5]
+            [0.5],
+            [1.5]
         ])
 
-        inactive_sq_dist_matrix = np.array([
-            [0.5 ** 2],
-            [0.5 ** 2],
-            [1.5 ** 2],
-        ])
-        inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l) * inactive_sq_dist_matrix)
+        inactive_sq_dist_matrix = cdist(active_z, inactive_z, 'sqeuclidean')
+        inactive_rbf_kernel = np.exp(-1.0 * inactive_sq_dist_matrix / np.exp(log_l))
         cross_cov = (alpha ** 2) * inactive_rbf_kernel
-        inactive_var = (alpha ** 2) + (sigma ** 2)
+        inactive_var = (alpha ** 2)
 
-        # Compute the true values
-        expected_mu = np.dot(active_x.T, np.dot(inv_active_cov, cross_cov)).T
-        expected_var = inactive_var - np.dot(cross_cov.T, np.dot(inv_active_cov, cross_cov))
-        expected_sigma = expected_var * np.identity(2)
+        expected_loglik = 0
+        for i in range(2):
+            expected_mu = np.dot(active_x.T, np.dot(inv_active_cov, cross_cov[:, [i]]))
+            expected_var = inactive_var - np.dot(cross_cov[:, [i]].T, np.dot(inv_active_cov, cross_cov[:, [i]]))
+            expected_cov = expected_var * np.identity(2)
+
+            expected_loglik += ss.multivariate_normal.logpdf(inactive_x[i, :], mean=expected_mu[:, 0], cov=expected_cov)
 
         # Compute the test values
         active_x_var = make_torch_variable(active_x, requires_grad=False)
         active_z_var = make_torch_variable(active_z, requires_grad=False)
         alpha_var = make_torch_variable([alpha], requires_grad=False)
-        sigma_var = make_torch_variable([sigma], requires_grad=False)
+        sigma_var = make_torch_variable([np.sqrt(var)], requires_grad=False)
         log_l_var = make_torch_variable([log_l], requires_grad=False)
-        inactive_z_var = make_torch_variable(inactive_z, requires_grad=True)
-        test_mu, test_sigma = _gp_conditional_mean_cov(
-            inactive_z_var, active_x_var, active_z_var, alpha_var, sigma_var, log_l_var
-        )
-
-        assert_array_almost_equal(expected_mu, test_mu.data.numpy(), decimal=5)
-        assert_array_almost_equal(expected_sigma, test_sigma.data.numpy(), decimal=5)
-
-        # Check gradient
-        test_mu.sum().backward(retain_graph=True)
-        self.assertIsNotNone(inactive_z_var.grad)
-        inactive_z_var.grad = None
-
-        test_sigma.sum().backward(retain_graph=True)
-        self.assertIsNotNone(inactive_z_var.grad)
-
-        # ### Next, check computation of likelihood
-
-        # Double the num points to check loop works
-        inactive_x = np.array([
-            [0.0, 0.0],
-            [0.0, 0.0]
-        ])
-        inactive_z = np.array([
-            [0.5],
-            [0.5]
-        ])
-
-        likelihood = ss.multivariate_normal(mean=expected_mu[0, :], cov=expected_sigma)
-        expected_log_lik = 2 * likelihood.logpdf(np.array([0.0, 0.0]))
-
         inactive_x_var = make_torch_variable(inactive_x, requires_grad=False)
         inactive_z_var = make_torch_variable(inactive_z, requires_grad=True)
-        test_log_lik = _inactive_point_likelihood(
+
+        # ### Next, check computation of likelihood
+        test_loglik = _inactive_point_likelihood(
             active_x_var, active_z_var, inactive_x_var, inactive_z_var,
             alpha_var, sigma_var, log_l_var
         )
 
-        assert_array_almost_equal(expected_log_lik, test_log_lik.data.numpy(), decimal=5)
+        assert_array_almost_equal(expected_loglik, test_loglik.data.numpy(), decimal=5)
 
         # Check grad
-        test_log_lik.sum().backward()
+        test_loglik.sum().backward()
         self.assertIsNotNone(inactive_z_var.grad)
 
     def test_vb_lower_bound(self):
@@ -353,7 +326,7 @@ class TestGPLVM(unittest.TestCase):
         ])
         inactive_rbf_kernel = np.exp(-1.0 / np.exp(log_l_q) * inactive_sq_dist_matrix)
         cross_cov = (alpha_q ** 2) * inactive_rbf_kernel
-        inactive_var = (alpha_q ** 2) + (sigma_q ** 2)
+        inactive_var = (alpha_q ** 2)
 
         # Compute the true values
         expected_mu = np.dot(active_z.T, np.dot(inv_active_cov, cross_cov)).T
